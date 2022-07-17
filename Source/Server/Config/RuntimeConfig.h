@@ -124,7 +124,7 @@ public:
 
     // Announcements that show up when a user joins the game.
     std::vector<RuntimeConfigAnnouncement> Announcements = {
-        { "Welcome to DS2OS", "\nYou have connected to an unofficial, work-in-progress, Dark Souls II server. Stability is not guaranteed, but welcome!\n\nMore information on this project is available here:\nhttps://github.com/tleonarduk/ds3os" }
+        { "Welcome to DS2OS", "\nYou have connected to an unofficial, work-in-progress, Dark Souls II server. Stability is not guaranteed, but welcome!\n\nMore information on this project is available here:\nhttps://github.com/tleonarduk/ds2os" }
     };
 
     // How often (in seconds) between each database trim.

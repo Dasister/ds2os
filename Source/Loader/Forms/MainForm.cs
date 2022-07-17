@@ -210,7 +210,7 @@ namespace Loader
 
         private void OnLoaded(object sender, EventArgs e)
         {
-            string PredictedInstallPath = SteamUtils.GetGameInstallPath("Dark Souls II Scholar of the First Sin") + @"\Game\DarkSoulsIII.exe";
+            string PredictedInstallPath = SteamUtils.GetGameInstallPath("Dark Souls II Scholar of the First Sin") + @"\Game\DarkSoulsII.exe";
             if (!File.Exists(ProgramSettings.Default.exe_location) && File.Exists(PredictedInstallPath))
             {
                 ProgramSettings.Default.exe_location = PredictedInstallPath;
@@ -543,7 +543,8 @@ namespace Loader
 
             string ConnectionHostname = ResolveConnectIp(Config);
 
-            byte[] DataBlock = UTF8Encoding.UTF8.GetBytes(Config.PublicKey);
+            // byte[] DataBlock = UTF8Encoding.UTF8.GetBytes(Config.PublicKey);
+            byte[] DataBlock = PatchingUtils.MakeEncryptedServerInfo(ConnectionHostname, Config.PublicKey);
             if (DataBlock == null)
             {
                 MessageBox.Show("Failed to encode server info patch. Potentially server information is too long to fit into the space available.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
