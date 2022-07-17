@@ -192,6 +192,16 @@ bool Server::Init()
         }
     }
 
+#define WriteState(State, bEnabled) WriteLog(bEnabled ? ConsoleColor::Green : ConsoleColor::Red, "", "Log", "%-25s: %s", State, bEnabled ? "Enabled" : "Disabled");
+    // WriteState("Blood Messages", !Config.DisableBloodMessages);
+    // WriteState("Blood Stains", !Config.DisableBloodStains);
+    // WriteState("Blood Ghosts", !Config.DisableGhosts);
+    WriteState("Invasions (Auto Summon)", !Config.DisableInvasionAutoSummon);
+    WriteState("Invasions", !Config.DisableInvasions);
+    WriteState("Coop (Auto Summon)", !Config.DisableCoopAutoSummon);
+    WriteState("Coop", !Config.DisableCoop);
+#undef WriteState
+
     return true;
 }
 
