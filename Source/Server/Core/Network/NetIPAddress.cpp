@@ -13,6 +13,17 @@
 #include <ws2tcpip.h>
 #include <stdio.h>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#elif defined(__linux__)
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#endif
+
+#include <stdio.h>
+
 bool NetIPAddress::FromHostname(const std::string& Input, NetIPAddress& Output)
 {
     // TODO: Do a non-windows variant of this.

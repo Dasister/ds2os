@@ -14,15 +14,18 @@
 #include <stdlib.h>
 
 #if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN 
 #include <windows.h>
 #include <ws2tcpip.h>
 #include <winsock2.h>
 #else
 #include <unistd.h>
 #include <sys/socket.h>
-#include <stdlib.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
 #include <netinet/in.h>
+#include <fcntl.h>
+
+#define SOCKET_ERROR (-1)
 #endif
 
 class NetConnectionUDP

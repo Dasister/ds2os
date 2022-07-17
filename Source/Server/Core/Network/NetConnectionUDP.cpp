@@ -12,6 +12,15 @@
 #include "Config/BuildConfig.h"
 #include "Core/Crypto/Cipher.h"
 
+#include <cstring>
+
+#ifdef __linux__
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#endif
+
+
 NetConnectionUDP::NetConnectionUDP(const std::string& InName)
     : Name(InName)
 {

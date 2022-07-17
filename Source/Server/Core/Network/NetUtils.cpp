@@ -10,6 +10,11 @@
 #include "Core/Network/NetUtils.h"
 #include "Core/Network/NetHttpRequest.h"
 
+#ifdef __linux__
+#include <netdb.h>
+#include <unistd.h>
+#endif
+
 bool GetMachineIPv4(NetIPAddress& Output, bool GetPublicAddress)
 {
     // For public ip address we query and external webapi.

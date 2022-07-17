@@ -12,6 +12,14 @@
 #include "Config/BuildConfig.h"
 #include "Core/Crypto/Cipher.h"
 
+#include <cstring>
+
+#ifdef __linux__
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
+
 NetConnectionTCP::NetConnectionTCP(const std::string& InName)
     : Name(InName)
 {
