@@ -13,12 +13,15 @@
 #include "Server/WebUIService/Handlers/PlayersHandler.h"
 #include "Server/WebUIService/Handlers/StatisticsHandler.h"
 #include "Server/WebUIService/Handlers/SettingsHandler.h"
+#include "Server/WebUIService/Handlers/DebugStatisticsHandler.h"
 #include "Server/WebUIService/Handlers/MessageHandler.h"
+#include "Server/WebUIService/Handlers/BansHandler.h"
 
 #include "Server/Server.h"
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/Strings.h"
 #include "Core/Utils/Random.h"
+#include "Core/Utils/DebugObjects.h"
 
 #include "Config/BuildConfig.h"
 #include "Config/RuntimeConfig.h"
@@ -31,6 +34,8 @@ WebUIService::WebUIService(Server* OwningServer)
     Handlers.push_back(std::make_shared<StatisticsHandler>(this));
     Handlers.push_back(std::make_shared<SettingsHandler>(this));
     Handlers.push_back(std::make_shared<MessageHandler>(this));
+    Handlers.push_back(std::make_shared<BansHandler>(this));
+    Handlers.push_back(std::make_shared<DebugStatisticsHandler>(this));
 }
 
 WebUIService::~WebUIService()
@@ -47,10 +52,10 @@ bool WebUIService::Init()
         return false;
     }
 
-    std::filesystem::path StaticPath = std::filesystem::current_path() / "..\\..\\Source\\WebUI\\Static";
+    std::filesystem::path StaticPath = std::filesystem::current_path() / "../../Source/WebUI/Static";
     if (!std::filesystem::exists(StaticPath))
     {
-        StaticPath = std::filesystem::current_path() / "WebUI\\Static";
+        StaticPath = std::filesystem::current_path() / "WebUI/Static";
     }
     if (!std::filesystem::exists(StaticPath))
     {
@@ -96,6 +101,8 @@ bool WebUIService::Term()
 
 void WebUIService::Poll()
 {
+    DebugTimerScope Scope(Debug::WebUIService_PollTime);
+
     ClearExpiredTokens();
     GatherData();
 }
@@ -163,6 +170,9 @@ void WebUIService::GatherData()
 {
     for (auto Handler : Handlers)
     {
-        Handler->GatherData();
+        if (Handler->NeedsDataGather())
+        {
+            Handler->GatherData();
+        }
     }    
 }

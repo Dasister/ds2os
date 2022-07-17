@@ -7,7 +7,7 @@
  * If not, see <https://opensource.org/licenses/MIT>.
  */
 
- // The version of protobuf we have to use to support DS2 doesn't generate
+ // The version of protobuf we have to use to support DS3 doesn't generate
  // code that compiles without warnings under x64 (lots of size_t truncation).
  // To keep things a bit cleaner we import all the files through this header and cpp.
 #pragma warning(disable: 4267 4244 4018)

@@ -12,6 +12,33 @@
 
 #include <ctime>
 #include <cstdarg>
+#include <list>
+#include <cstdio>
+
+namespace 
+{
+    std::mutex RecentMessageMutex;
+    std::list<LogMessage> RecentMessages;
+};
+
+std::list<LogMessage> GetRecentLogs()
+{
+    std::scoped_lock lock(RecentMessageMutex);
+    return RecentMessages;
+}
+
+void StoreRecentMessage(const LogMessage& Message)
+{
+    std::scoped_lock lock(RecentMessageMutex);
+
+    RecentMessages.push_back(Message);
+
+    // Only keep a small buffer of messages, trim old ones.
+    if (RecentMessages.size() > 16)
+    {
+        RecentMessages.erase(RecentMessages.begin());
+    }
+}
 
 void WriteLogStatic(ConsoleColor Color, const char* Source, const char* Level, const char* Log)
 {
@@ -32,6 +59,13 @@ void WriteLogStatic(ConsoleColor Color, const char* Source, const char* Level, c
     }
 
     WriteToConsole(Color, buffer_to_use);
+
+    LogMessage Message;
+    Message.Level = Level;
+    Message.Source = Source;
+    Message.Message = Log;
+    Message.Time = GetSeconds();
+    StoreRecentMessage(Message);
 
     if (buffer_to_use != buffer)
     {

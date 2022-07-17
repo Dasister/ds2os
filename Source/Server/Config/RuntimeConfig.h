@@ -60,10 +60,10 @@ class RuntimeConfig
 public:
 
     // Name used in the server import file.
-    std::string ServerName = "Dark Souls 2 Server";
+    std::string ServerName = "Dark Souls 3 Server";
 
     // Description used in the server import file.
-    std::string ServerDescription = "A custom Dark Souls 2 server.";
+    std::string ServerDescription = "A custom Dark Souls 3 server.";
 
     // Hostname of the server that should be used for connecting.
     // If none is supplied then this wil be the external ip of the server.
@@ -75,7 +75,7 @@ public:
 
     // If Advertise is set this is the master server that it will be registered to.
     // Be careful changing this, typically only one server should exist.
-    std::string MasterServerIp = "timleonard.uk";
+    std::string MasterServerIp = "ds3os-master.timleonard.uk";
 
     // Port the master server lists for connections at MasterServerIp;
     int MasterServerPort = 50020;
@@ -124,7 +124,7 @@ public:
 
     // Announcements that show up when a user joins the game.
     std::vector<RuntimeConfigAnnouncement> Announcements = {
-        { "Welcome to DS2OS", "\nYou have connected to an unofficial, work-in-progress, Dark Souls II server. Stability is not guaranteed, but welcome!\n\nMore information on this project is available here:\nhttps://github.com/tleonarduk/ds2os" }
+        { "Welcome to DS3OS", "\nYou have connected to an unofficial, work-in-progress, Dark Souls III server. Stability is not guaranteed, but welcome!\n\nMore information on this project is available here:\nhttps://github.com/tleonarduk/ds3os" }
     };
 
     // How often (in seconds) between each database trim.
@@ -191,11 +191,37 @@ public:
     // Disables all ability to place summon signs.
     bool DisableCoop = false;
 
+    // Disables bloodmessages.
+    // Defaults to true as mitigation to CVE-2022-24125 / CVE-2022-24126
+    bool DisableBloodMessages = true;
+
+    // Disables bloodstains.
+    // Defaults to true as mitigation to CVE-2022-24125 / CVE-2022-24126
+    bool DisableBloodStains = true;
+
+    // Disables ghosts
+    // Defaults to true as mitigation to CVE-2022-24125 / CVE-2022-24126
+    bool DisableGhosts = true;
+
     // Disables all auto summoning for invasions (alrich faithful, watchdogs, etc)
     bool DisableInvasionAutoSummon = false;
 
     // Disables all auto summoning for coop (blue sentinels, etc)
     bool DisableCoopAutoSummon = false;
+
+    // If enabled invasion attempts will search all locations, not just the filtered list
+    // that is supplied by the client.
+    bool IgnoreInvasionAreaFilter = false;
+
+    // How frequently (in seconds) the clients should send PlayerStatus updates. Increase this to 
+    // reduce network bandwidth. Client clamps this to a minimum of 5.
+    float PlayerStatusUploadInterval = 5.0f;
+
+    // How much delay (in seconds) should be placed on RequestUpdatePlayerCharacter calls. Clamped to 60->50000
+    float PlayerCharacterUpdateSendDelay = 600.0f;
+
+    // How much delay (in seconds) should be placed on RequestUpdatePlayerStatus calls. Clamped to 60->50000
+    float PlayerStatusUploadSendDelay = 300.0f;
 
     // Parameters used for determining which signs a player can see.
     RuntimeConfigMatchingParameters SummonSignMatchingParameters = {
@@ -262,6 +288,98 @@ public:
         false,                                                          // DisableLevelMatching
         false,                                                          // DisableWeaponLevelMatching
     };    
+
+    // If enabled player behaviour will be scanned for cheating, and appropriate penalties applied.
+    bool AntiCheatEnabled = false;
+
+    // If disabled anti-cheat will not apply penalties, allows human to judge suitable-ness for banning.
+    bool AntiCheatApplyPenalties = false;
+
+
+    // Message shown to a user in announcements if they have been flagged as cheating.
+    std::string AntiCheatWarningMessage = "Your account has been flagged for unfair play, if this continues you may be disconnected or banned from the server.";
+
+    // Message shown to a user in announcements if they have been flagged as cheating.
+    std::string AntiCheatDisconnectMessage = "Your account has been flagged for unfair play, you will be disconnected from the server.";
+
+    // Message shown in-game just before banning the user.
+    std::string AntiCheatBanMessage = "Your account has been flagged for unfair play, you have been banned from the server.";
+
+    // Message shown when user logs in when they are banned.
+    std::string BanAnnouncementMessage = "Your account has been banned from this server.";
+
+    // Message shown when user logs in when they have a penalty score above the warning level.
+    std::string WarningAnnouncementMessage = "Your account has been flagged for unfair play. Further unfair behaviour will lead to disconnection or bans.";
+
+
+    // If set the player will recieve ingame management messages periodically when they mean the threshold.
+    bool AntiCheatSendWarningMessageInGame = true;
+
+    // How often the user will see a message if AntiCheatSendWarningMessageInGame is enabled.
+    float AntiCheatSendWarningMessageInGameInterval = 120.0f;
+
+
+    // How high the players penalty score has to be to cause them to start seeing the warning message.
+    float AntiCheatWarningThreshold = 10;
+
+    // How high the players penalty score has to be to cause them to be disconnected when detected.
+    float AntiCheatDisconnectThreshold = 25;
+
+    // How high the players penalty score has to be to cause them to be permanently banned.
+    float AntiCheatBanThreshold = 100;
+
+
+    // How much gets added to the players penalty score when the anti-cheat data supplied by the client is unexpected.
+    float AntiCheatScore_ClientFlagged = 25;
+
+    // How much gets added to the players penalty score when impossible stats are detected (eg. 99 in each stat, but level 1).
+    float AntiCheatScore_ImpossibleStats = 25;
+
+    // How much gets added to the players penalty score when they have an impossible name (eg. blank)
+    float AntiCheatScore_ImpossibleName = 10;
+
+    // How much gets added to the players penalty score when a potential security exploit is detected.
+    float AntiCheatScore_Exploit = 100;
+
+
+    // Unimplemented
+
+    // How much gets added to the players penalty score when the delta between their stats on one update and another is impossible (eg. going from level 1 to 100).
+    float AntiCheatScore_ImpossibleStatDelta = 20;
+
+    // How much gets added to the players penalty score when they recieve and impossible number of items in one go (eg. 100x titanite slabs).
+    float AntiCheatScore_ImpossibleGetItemQuantity = 20;
+
+    // How much gets added to the players penalty score when their level is impossible with the play time they have.
+    float AntiCheatScore_ImpossiblePlayTime = 10;
+
+    // How much gets added to the players penalty score when they are in an impossible location (eg. at end of the game without triggering any of the mandatory boss events).
+    float AntiCheatScore_ImpossibleLocation = 10;
+
+    // How much gets added to the players penalty score when disconnects occur during multiplayer.
+    float AntiCheatScore_UnfairDisconnect = 5;
+
+
+    // If supplied various notifications can be made to discord.
+    std::string DiscordWebHookUrl = "";
+
+    // Send notifications when anti-cheat flags occur.
+    bool SendDiscordNotice_AntiCheat = true;
+
+    // Send notifications when sign placed.
+    bool SendDiscordNotice_SummonSign = true;
+
+    // Send notifications when a quick match begins.
+    bool SendDiscordNotice_QuickMatch = true;
+
+    // Send notifications when a bell is rung.
+    bool SendDiscordNotice_Bell = true;
+
+    // Send notifications when a boss is killed.
+    bool SendDiscordNotice_Boss = true;
+
+    // Send notifications when players kill each other.
+    bool SendDiscordNotice_PvP = true;
 
 public:
 

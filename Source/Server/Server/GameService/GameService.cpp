@@ -22,6 +22,7 @@
 #include "Server/GameService/GameManagers/Visitor/VisitorManager.h"
 #include "Server/GameService/GameManagers/Mark/MarkManager.h"
 #include "Server/GameService/GameManagers/Misc/MiscManager.h"
+#include "Server/GameService/GameManagers/AntiCheat/AntiCheatManager.h"
 
 #include "Server/Server.h"
 #include "Server/Streams/Frpg2ReliableUdpPacketStream.h"
@@ -31,6 +32,7 @@
 #include "Core/Network/NetConnectionUDP.h"
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/Strings.h"
+#include "Core/Utils/DebugObjects.h"
 
 #include "Config/BuildConfig.h"
 #include "Config/RuntimeConfig.h"
@@ -56,6 +58,7 @@ GameService::GameService(Server* OwningServer, RSAKeyPair* InServerRSAKey)
     Managers.push_back(std::make_shared<VisitorManager>(ServerInstance, this));
     Managers.push_back(std::make_shared<MarkManager>(ServerInstance));
     Managers.push_back(std::make_shared<MiscManager>(ServerInstance, this));
+    Managers.push_back(std::make_shared<AntiCheatManager>(ServerInstance, this));
 }
 
 GameService::~GameService()
@@ -118,6 +121,8 @@ void GameService::TrimDatabase()
 
 void GameService::Poll()
 {
+    DebugTimerScope Scope(Debug::GameService_PollTime);
+
     Connection->Pump();
 
     for (auto& Manager : Managers)
@@ -134,29 +139,6 @@ void GameService::Poll()
     {
         TrimDatabase();
     }
-
-
-    // DEBUG DEBUG DEBUG
-    static double Timer = 0.0;
-    if (GetSeconds() > Timer)
-    {
-        for (auto Client : Clients)
-        {
-            PlayerState& State = Client->GetPlayerState();
-            if (State.PlayerStatus.has_player_status())
-            {
-                Log("User=%s NetMode=%i WorldType=%i InvasionType=%i", 
-                    Client->GetName().c_str(),
-                    (int)State.PlayerStatus.player_status().net_mode(),
-                    (int)State.PlayerStatus.player_status().world_type(),
-                    (int)State.PlayerStatus.player_status().invasion_type()
-                );
-            }
-        }
-        Timer = GetSeconds() + 10.0;
-    }
-    // DEBUG DEBUG DEBUG
-
 
     for (auto iter = Clients.begin(); iter != Clients.end(); /* empty */)
     {
@@ -211,7 +193,7 @@ void GameService::Poll()
         double ElapsedTime = GetSeconds() - Pair.second.LastRefreshTime;
         if (ElapsedTime > BuildConfig::AUTH_TICKET_TIMEOUT)
         {
-            Log("Authentication token 0x%016llx has expired.", Pair.second.AuthToken);
+            Verbose("Authentication token 0x%016llx has expired.", Pair.second.AuthToken);
             iter = AuthenticationStates.erase(iter);
         }
         else
@@ -248,6 +230,8 @@ void GameService::HandleClientConnection(std::shared_ptr<NetConnection> ClientCo
 
     GameClientAuthenticationState& AuthState = (*AuthStateIter).second;
 
+    Debug::GameConnections.Add(1);
+
     std::shared_ptr<GameClient> Client = std::make_shared<GameClient>(this, ClientConnection, AuthState.CwcKey, AuthState.AuthToken);
     Clients.push_back(Client);
 
@@ -265,7 +249,7 @@ std::string GameService::GetName()
 
 void GameService::CreateAuthToken(uint64_t AuthToken, const std::vector<uint8_t>& CwcKey)
 {
-    LogS(Connection->GetName().c_str(), "Created authentication token 0x%016llx", AuthToken);
+    VerboseS(Connection->GetName().c_str(), "Created authentication token 0x%016llx", AuthToken);
 
     GameClientAuthenticationState AuthState;
     AuthState.AuthToken = AuthToken;
@@ -289,7 +273,19 @@ std::shared_ptr<GameClient> GameService::FindClientByPlayerId(uint32_t PlayerId)
 {
     for (std::shared_ptr<GameClient>& Client : Clients)
     {
-        if (Client->GetPlayerState().PlayerId == PlayerId)
+        if (Client->GetPlayerState().GetPlayerId() == PlayerId)
+        {
+            return Client;
+        }
+    }
+    return nullptr;
+}
+
+std::shared_ptr<GameClient> GameService::FindClientBySteamId(const std::string& SteamId)
+{
+    for (std::shared_ptr<GameClient>& Client : Clients)
+    {
+        if (Client->GetPlayerState().GetSteamId() == SteamId)
         {
             return Client;
         }

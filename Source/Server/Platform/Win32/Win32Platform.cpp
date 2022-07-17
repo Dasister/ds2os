@@ -15,7 +15,7 @@
 #include <chrono>
 
 #if defined(_WIN32)
- // Link to the windows socket library.
+// Link to the windows socket library.
 #pragma comment(lib, "Ws2_32.lib")
 #endif
 
@@ -34,10 +34,10 @@ public:
     {
         PlatformEvents::OnCtrlSignal.HookFirstRegistered([]() {
             SetConsoleCtrlHandler(CtrlSignalCallback, true);
-            });
+        });
         PlatformEvents::OnCtrlSignal.HookLastUnregistered([]() {
             SetConsoleCtrlHandler(CtrlSignalCallback, false);
-            });
+        });
     }
 
     ~Win32CtrlSignalHandler()
@@ -51,7 +51,7 @@ public:
 bool PlatformInit()
 {
     WSADATA wsaData;
-    if (int Result = WSAStartup(MAKEWORD(2, 2), &wsaData); Result != 0)
+    if (int Result = WSAStartup(MAKEWORD(2, 2), &wsaData); Result != 0) 
     {
         Error("WSAStartup failed with error 0x%08x.", Result);
         return false;

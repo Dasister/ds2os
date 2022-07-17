@@ -1,5 +1,5 @@
 /*
- * Dark Souls 2_Open Server
+ * Dark Souls 3_Open Server
  * Copyright (C) 2021 Tim Leonard
  *
  * This program is free software; licensed under the MIT license.
@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include "Server/GameService/Utils/Gameids.h"
+#include "Server/GameService/Utils/GameIds.h"
 
 #include <unordered_map>
 #include <deque>

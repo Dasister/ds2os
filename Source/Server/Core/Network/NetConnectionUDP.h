@@ -11,8 +11,6 @@
 
 #include "Core/Network/NetConnection.h"
 
-#include <stdlib.h>
-
 #if defined(_WIN32)
 #include <windows.h>
 #include <ws2tcpip.h>
@@ -28,6 +26,8 @@
 #define SOCKET_ERROR (-1)
 #endif
 
+#include <stdlib.h>
+
 class NetConnectionUDP
     : public NetConnection
 {
@@ -39,7 +39,7 @@ public:
 #else
     using SocketType = int;
     using SocketLenType = socklen_t;
-    const SocketType INVALID_SOCKET_VALUE = 0;
+    const SocketType INVALID_SOCKET_VALUE = -1;
 #endif
 
 public:
@@ -67,7 +67,18 @@ public:
     virtual std::string GetName() override;
     virtual void Rename(const std::string& Name) override;
 
+protected:
+    struct PendingPacket
+    {
+        std::vector<uint8_t> Data;
+        sockaddr_in SourceAddress;
+        double ProcessTime = 0.0f;
+    };
+
+    void ProcessPacket(const PendingPacket& Packet);
+
 private:
+
     std::string Name;
     NetIPAddress IPAddress;
 
@@ -77,6 +88,8 @@ private:
     bool bChild = false;
 
     sockaddr_in Destination = {};
+
+    std::vector<PendingPacket> PendingPackets;
 
     std::vector<uint8_t> RecieveBuffer;
     std::vector<std::vector<uint8_t>> RecieveQueue;

@@ -17,6 +17,9 @@
 #include "Server/Server.h"
 #include "Server/Database/ServerDatabase.h"
 
+#include "Config/BuildConfig.h"
+#include "Server/GameService/Utils/NRSSRSanitizer.h"
+
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/File.h"
 #include "Core/Utils/Strings.h"
@@ -164,7 +167,7 @@ MessageHandleResult BloodMessageManager::Handle_RequestReCreateBloodMessageList(
         MessageData.assign(MessageInfo.message_data().data(), MessageInfo.message_data().data() + MessageInfo.message_data().size());
 
         // Create the message in the database.
-        std::shared_ptr<BloodMessage> BloodMessage = Database.CreateBloodMessage((OnlineAreaId)MessageInfo.online_area_id(), Player.PlayerId, Player.SteamId, Request->character_id(), MessageData);
+        std::shared_ptr<BloodMessage> BloodMessage = Database.CreateBloodMessage((OnlineAreaId)MessageInfo.online_area_id(), Player.GetPlayerId(), Player.GetSteamId(), Request->character_id(), MessageData);
         if (!BloodMessage)
         {
             WarningS(Client->GetName().c_str(), "Failed to recreate blood message.");
@@ -248,7 +251,23 @@ MessageHandleResult BloodMessageManager::Handle_RequestCreateBloodMessage(GameCl
     std::vector<uint8_t> MessageData;
     MessageData.assign(Request->message_data().data(), Request->message_data().data() + Request->message_data().size());
 
-    if (std::shared_ptr<BloodMessage> ActiveMessage = Database.CreateBloodMessage((OnlineAreaId)Request->online_area_id(), Player.PlayerId, Player.SteamId, Request->character_id(), MessageData))
+    // There is no NRSSR struct in blood messsage data, but we still make sure the size-delimited entry list is valid.
+    if constexpr (BuildConfig::NRSSR_SANITY_CHECKS)
+    {
+        auto ValidationResult = NRSSRSanitizer::ValidateEntryList(MessageData.data(), MessageData.size());
+        if (ValidationResult != NRSSRSanitizer::ValidationResult::Valid)
+        {
+            WarningS(Client->GetName().c_str(), "Blood message data recieved from client is invalid (error code %i).",
+                static_cast<uint32_t>(ValidationResult));
+
+            Client->GetPlayerState().GetAntiCheatState_Mutable().ExploitDetected = true;
+
+            // Simply ignore the request. Perhaps sending a response with an invalid sign id or disconnecting the client would be better?
+            return MessageHandleResult::Handled;
+        }
+    }
+
+    if (std::shared_ptr<BloodMessage> ActiveMessage = Database.CreateBloodMessage((OnlineAreaId)Request->online_area_id(), Player.GetPlayerId(), Player.GetSteamId(), Request->character_id(), MessageData))
     {
         Response.set_message_id(ActiveMessage->MessageId);
 
@@ -262,7 +281,7 @@ MessageHandleResult BloodMessageManager::Handle_RequestCreateBloodMessage(GameCl
 
     std::string TypeStatisticKey = StringFormat("BloodMessage/TotalCreated");
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
     
     if (!Client->MessageStream->Send(&Response, &Message))
     {
@@ -282,7 +301,7 @@ MessageHandleResult BloodMessageManager::Handle_RequestRemoveBloodMessage(GameCl
 
     LogS(Client->GetName().c_str(), "Removing blood message %i.", Request->message_id());
 
-    if (Database.RemoveOwnBloodMessage(Player.PlayerId, Request->message_id()))
+    if (Database.RemoveOwnBloodMessage(Player.GetPlayerId(), Request->message_id()))
     {
         LiveCache.Remove((OnlineAreaId)Request->online_area_id(), Request->message_id());
     }
@@ -305,43 +324,48 @@ MessageHandleResult BloodMessageManager::Handle_RequestRemoveBloodMessage(GameCl
 
 MessageHandleResult BloodMessageManager::Handle_RequestGetBloodMessageList(GameClient* Client, const Frpg2ReliableUdpMessage& Message)
 {
+    const RuntimeConfig& Config = ServerInstance->GetConfig();
     ServerDatabase& Database = ServerInstance->GetDatabase();
     PlayerState& Player = Client->GetPlayerState();
 
     Frpg2RequestMessage::RequestGetBloodMessageList* Request = (Frpg2RequestMessage::RequestGetBloodMessageList*)Message.Protobuf.get();
     Frpg2RequestMessage::RequestGetBloodMessageListResponse Response;
+    Response.mutable_messages();
 
     uint32_t RemainingMessageCount = Request->max_messages();
 
-    // Grab a random set of message from the live cache.
-    for (int i = 0; i < Request->search_areas_size() && RemainingMessageCount > 0; i++)
+    if (!Config.DisableBloodMessages)
     {
-        const Frpg2RequestMessage::BloodMessageDomainLimitData& Area = Request->search_areas(i);
-
-        OnlineAreaId AreaId = (OnlineAreaId)Area.online_area_id();
-        uint32_t MaxForArea = Area.max_type_1() + Area.max_type_2(); // TODO: we need to figure out the difference between these two types.
-        uint32_t GatherCount = std::min(MaxForArea, RemainingMessageCount);
-
-        std::vector<std::shared_ptr<BloodMessage>> AreaMessages = LiveCache.GetRandomSet(AreaId, GatherCount);
-        for (std::shared_ptr<BloodMessage>& AreaMsg : AreaMessages)
+        // Grab a random set of message from the live cache.
+        for (int i = 0; i < Request->search_areas_size() && RemainingMessageCount > 0; i++)
         {
-            // Filter players own messages.
-            if (AreaMsg->PlayerId == Player.PlayerId)
-            {
-                continue;
-            }
-            
-            Frpg2RequestMessage::BloodMessageData& Data = *Response.mutable_messages()->Add();
-            Data.set_player_id(AreaMsg->PlayerId);
-            Data.set_character_id(AreaMsg->CharacterId); 
-            Data.set_message_id(AreaMsg->MessageId);
-            Data.set_good(AreaMsg->RatingGood);
-            Data.set_message_data(AreaMsg->Data.data(), AreaMsg->Data.size());
-            Data.set_player_steam_id(AreaMsg->PlayerSteamId);
-            Data.set_online_area_id((uint32_t)AreaMsg->OnlineAreaId);
-            Data.set_poor(AreaMsg->RatingPoor);
+            const Frpg2RequestMessage::BloodMessageDomainLimitData& Area = Request->search_areas(i);
 
-            RemainingMessageCount--;
+            OnlineAreaId AreaId = (OnlineAreaId)Area.online_area_id();
+            uint32_t MaxForArea = Area.max_type_1() + Area.max_type_2(); // TODO: we need to figure out the difference between these two types.
+            uint32_t GatherCount = std::min(MaxForArea, RemainingMessageCount);
+
+            std::vector<std::shared_ptr<BloodMessage>> AreaMessages = LiveCache.GetRandomSet(AreaId, GatherCount);
+            for (std::shared_ptr<BloodMessage>& AreaMsg : AreaMessages)
+            {
+                // Filter players own messages.
+                if (AreaMsg->PlayerId == Player.GetPlayerId())
+                {
+                    continue;
+                }
+            
+                Frpg2RequestMessage::BloodMessageData& Data = *Response.mutable_messages()->Add();
+                Data.set_player_id(AreaMsg->PlayerId);
+                Data.set_character_id(AreaMsg->CharacterId); 
+                Data.set_message_id(AreaMsg->MessageId);
+                Data.set_good(AreaMsg->RatingGood);
+                Data.set_message_data(AreaMsg->Data.data(), AreaMsg->Data.size());
+                Data.set_player_steam_id(AreaMsg->PlayerSteamId);
+                Data.set_online_area_id((uint32_t)AreaMsg->OnlineAreaId);
+                Data.set_poor(AreaMsg->RatingPoor);
+
+                RemainingMessageCount--;
+            }
         }
     }
 
@@ -382,7 +406,7 @@ MessageHandleResult BloodMessageManager::Handle_RequestEvaluateBloodMessage(Game
 
     if (ActiveMessage != nullptr)
     {
-        if (ActiveMessage->PlayerId == Player.PlayerId)
+        if (ActiveMessage->PlayerId == Player.GetPlayerId())
         {
             WarningS(Client->GetName().c_str(), "Disconnecting client as attempted to evaluate own message id '%u'.", Request->message_id());
             return MessageHandleResult::Error;
@@ -413,8 +437,8 @@ MessageHandleResult BloodMessageManager::Handle_RequestEvaluateBloodMessage(Game
 
             Frpg2RequestMessage::PushRequestEvaluateBloodMessage EvaluatePushMessage;
             EvaluatePushMessage.set_push_message_id(Frpg2RequestMessage::PushID_PushRequestEvaluateBloodMessage);
-            EvaluatePushMessage.set_player_id(Player.PlayerId);
-            EvaluatePushMessage.set_player_steam_id(Player.SteamId);
+            EvaluatePushMessage.set_player_id(Player.GetPlayerId());
+            EvaluatePushMessage.set_player_steam_id(Player.GetSteamId());
             EvaluatePushMessage.set_message_id(ActiveMessage->MessageId);
             EvaluatePushMessage.set_was_poor(Request->was_poor());
 
@@ -427,7 +451,7 @@ MessageHandleResult BloodMessageManager::Handle_RequestEvaluateBloodMessage(Game
 
     std::string TypeStatisticKey = StringFormat("BloodMessage/TotalEvaluated");
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
 
     // Empty response, not sure what purpose this serves really other than saying message-recieved. Client
     // doesn't work without it though.

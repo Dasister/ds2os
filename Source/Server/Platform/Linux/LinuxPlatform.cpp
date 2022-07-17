@@ -1,5 +1,5 @@
 /*
- * Dark Souls 3 - Open Server
+ * Dark Souls 2 - Open Server
  * Copyright (C) 2021 Tim Leonard
  *
  * This program is free software; licensed under the MIT license.

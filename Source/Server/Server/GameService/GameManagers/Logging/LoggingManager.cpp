@@ -8,6 +8,7 @@
  */
 
 #include "Server/GameService/GameManagers/Logging/LoggingManager.h"
+#include "Server/GameService/GameService.h"
 #include "Server/GameService/GameClient.h"
 #include "Server/Streams/Frpg2ReliableUdpMessage.h"
 #include "Server/Streams/Frpg2ReliableUdpMessageStream.h"
@@ -125,14 +126,14 @@ void LoggingManager::Handle_UseMagicLog(GameClient* Client, Frpg2RequestMessage:
 
         std::string StatisticKey = StringFormat("Magic/TotalUsed/Id=%u", Item.spell_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Magic/TotalUsed");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_ActGestureLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -154,14 +155,14 @@ void LoggingManager::Handle_ActGestureLog(GameClient* Client, Frpg2RequestMessag
 
         std::string StatisticKey = StringFormat("Gesture/TotalUsed/Id=%u", Item.guesture_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Gesture/TotalUsed");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_UseItemLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -183,14 +184,14 @@ void LoggingManager::Handle_UseItemLog(GameClient* Client, Frpg2RequestMessage::
 
         std::string StatisticKey = StringFormat("Item/TotalUsed/Id=%u", Item.item_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Item/TotalUsed");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_PurchaseItemLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -212,14 +213,14 @@ void LoggingManager::Handle_PurchaseItemLog(GameClient* Client, Frpg2RequestMess
 
         std::string StatisticKey = StringFormat("Item/TotalPurchased/Id=%u", Item.item_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Item/TotalPurchased");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_GetItemLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -241,14 +242,14 @@ void LoggingManager::Handle_GetItemLog(GameClient* Client, Frpg2RequestMessage::
 
         std::string StatisticKey = StringFormat("Item/TotalRecieved/Id=%u", Item.item_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Item/TotalRecieved");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_DropItemLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -270,14 +271,14 @@ void LoggingManager::Handle_DropItemLog(GameClient* Client, Frpg2RequestMessage:
 
         std::string StatisticKey = StringFormat("Item/TotalDropped/Id=%u", Item.item_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Item/TotalDropped");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_LeaveItemLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -299,14 +300,14 @@ void LoggingManager::Handle_LeaveItemLog(GameClient* Client, Frpg2RequestMessage
 
         std::string StatisticKey = StringFormat("Item/TotalLeft/Id=%u", Item.item_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Item/TotalLeft");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_SaleItemLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -328,14 +329,14 @@ void LoggingManager::Handle_SaleItemLog(GameClient* Client, Frpg2RequestMessage:
 
         std::string StatisticKey = StringFormat("Item/TotalSold/Id=%u", Item.item_id());
         Database.AddGlobalStatistic(StatisticKey, Item.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, Item.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), Item.count());
 
         TotalCount += Item.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Item/TotalSold");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 void LoggingManager::Handle_StrengthenWeaponLog(GameClient* Client, Frpg2RequestMessage::RequestNotifyProtoBufLog* Request)
@@ -357,14 +358,14 @@ void LoggingManager::Handle_StrengthenWeaponLog(GameClient* Client, Frpg2Request
 
         std::string StatisticKey = StringFormat("Item/TotalUpgraded/Id=%u", Item.from_item_id());
         Database.AddGlobalStatistic(StatisticKey, 1);
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, 1);
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), 1);
 
         TotalCount += 1;
     }
 
     std::string TotalStatisticKey = StringFormat("Item/TotalUpgraded");
     Database.AddGlobalStatistic(TotalStatisticKey, TotalCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, TotalCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), TotalCount);
 }
 
 MessageHandleResult LoggingManager::Handle_RequestNotifyKillEnemy(GameClient* Client, const Frpg2ReliableUdpMessage& Message)
@@ -381,14 +382,14 @@ MessageHandleResult LoggingManager::Handle_RequestNotifyKillEnemy(GameClient* Cl
 
         std::string StatisticKey = StringFormat("Enemies/TotalKilled/Id=%u", EnemyInfo.enemy_type_id());
         Database.AddGlobalStatistic(StatisticKey, EnemyInfo.count());
-        Database.AddPlayerStatistic(StatisticKey, Player.PlayerId, EnemyInfo.count());
+        Database.AddPlayerStatistic(StatisticKey, Player.GetPlayerId(), EnemyInfo.count());
 
         EnemyCount += EnemyInfo.count();
     }
 
     std::string TotalStatisticKey = StringFormat("Enemies/TotalKilled");
     Database.AddGlobalStatistic(TotalStatisticKey, EnemyCount);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, EnemyCount);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), EnemyCount);
     
     Frpg2RequestMessage::EmptyResponse Response;
     if (!Client->MessageStream->Send(&Response, &Message))
@@ -425,7 +426,7 @@ MessageHandleResult LoggingManager::Handle_RequestNotifyRegisterCharacter(GameCl
 
     std::string TotalStatisticKey = StringFormat("Player/TotalRegisteredCharacters");
     Database.AddGlobalStatistic(TotalStatisticKey, 1);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), 1);
 
     Frpg2RequestMessage::EmptyResponse Response;
     if (!Client->MessageStream->Send(&Response, &Message))
@@ -441,22 +442,48 @@ MessageHandleResult LoggingManager::Handle_RequestNotifyDie(GameClient* Client, 
 {
     ServerDatabase& Database = ServerInstance->GetDatabase();
     PlayerState& Player = Client->GetPlayerState();
+    GameService& Game = *ServerInstance->GetService<GameService>();
 
     Frpg2RequestMessage::RequestNotifyDie* Request = (Frpg2RequestMessage::RequestNotifyDie*)Message.Protobuf.get();
 
     std::string TypeStatisticKey = StringFormat("Player/TotalDeaths/Cause=%u", (uint32_t)Request->cause_of_death());
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
 
     std::string TotalStatisticKey = StringFormat("Player/TotalDeaths");
     Database.AddGlobalStatistic(TotalStatisticKey, 1);
-    Database.AddPlayerStatistic(TotalStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TotalStatisticKey, Player.GetPlayerId(), 1);
 
     Frpg2RequestMessage::EmptyResponse Response;
     if (!Client->MessageStream->Send(&Response, &Message))
     {
         WarningS(Client->GetName().c_str(), "Disconnecting client as failed to send EmptyResponse response.");
         return MessageHandleResult::Error;
+    }
+    
+    if (ServerInstance->GetConfig().SendDiscordNotice_PvP)
+    {
+        auto& KillerInfo = Request->killer_info();
+
+        if (KillerInfo.killer_player_id() > 0)
+        {
+            if (auto KillerClient = Game.FindClientByPlayerId(KillerInfo.killer_player_id()); KillerClient != nullptr)
+            {
+                ServerInstance->SendDiscordNotice(Client->shared_from_this(), DiscordNoticeType::PvPKill,
+                    "Was killed by another player.",
+                    0,
+                    {
+                        { "Killer", KillerClient->GetPlayerState().GetCharacterName(), false },
+                        
+                        { "Killer Soul Level", std::to_string(KillerClient->GetPlayerState().GetSoulLevel()), false },
+                        { "Killer Weapon Level", std::to_string(KillerClient->GetPlayerState().GetMaxWeaponLevel()), false },
+
+                        { "Soul Level", std::to_string(Client->GetPlayerState().GetSoulLevel()), false },
+                        { "Weapon Level", std::to_string(Client->GetPlayerState().GetMaxWeaponLevel()), false }
+                    }
+                );
+            }
+        }
     }
 
     return MessageHandleResult::Handled;
@@ -473,6 +500,51 @@ MessageHandleResult LoggingManager::Handle_RequestNotifyKillBoss(GameClient* Cli
     {
         WarningS(Client->GetName().c_str(), "Disconnecting client as failed to send EmptyResponse response.");
         return MessageHandleResult::Error;
+    }
+    
+    if (ServerInstance->GetConfig().SendDiscordNotice_Boss)
+    {
+        BossId Id = (BossId)Request->boss_id();
+
+        if (Request->boss_died())
+        {
+            if (Request->in_coop())
+            {
+                ServerInstance->SendDiscordNotice(Client->shared_from_this(), DiscordNoticeType::KilledBoss,
+                    StringFormat("Killed '%s' with help.", GetEnumString<BossId>(Id).c_str()),
+                    static_cast<uint32_t>(Id),
+                    {
+                        { "Fight Duration", std::to_string(Request->fight_duration()), false },
+                        { "Soul Level", std::to_string(Client->GetPlayerState().GetSoulLevel()), false },
+                        { "Weapon Level", std::to_string(Client->GetPlayerState().GetMaxWeaponLevel()), false }
+                    }
+                );
+            }
+            else
+            {
+                ServerInstance->SendDiscordNotice(Client->shared_from_this(), DiscordNoticeType::KilledBoss,
+                    StringFormat("Solo killed '%s'.", GetEnumString<BossId>(Id).c_str()),
+                    static_cast<uint32_t>(Id),
+                    { 
+                        { "Fight Duration", std::to_string(Request->fight_duration()), false },
+                        { "Soul Level", std::to_string(Client->GetPlayerState().GetSoulLevel()), false },
+                        { "Weapon Level", std::to_string(Client->GetPlayerState().GetMaxWeaponLevel()), false }
+                    }
+                );
+            }
+        }
+        else
+        {
+            ServerInstance->SendDiscordNotice(Client->shared_from_this(), DiscordNoticeType::DiedToBoss,
+                StringFormat("Died to '%s'.", GetEnumString<BossId>(Id).c_str()),
+                static_cast<uint32_t>(Id),
+                {
+                    { "Fight Duration", std::to_string(Request->fight_duration()), false },
+                    { "Soul Level", std::to_string(Client->GetPlayerState().GetSoulLevel()), false },
+                    { "Weapon Level", std::to_string(Client->GetPlayerState().GetMaxWeaponLevel()), false }
+                }
+            );
+        }
     }
 
     return MessageHandleResult::Handled;
@@ -503,13 +575,13 @@ MessageHandleResult LoggingManager::Handle_RequestNotifyLeaveMultiplay(GameClien
 
     std::string TypeStatisticKey = StringFormat("Player/TotalMultiplaySessions");
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
 
     for (int i = 0; i < Request->party_member_info_size(); i++)
     {        
         const Frpg2RequestMessage::PartyMemberInfo& Info = Request->party_member_info(i);
         std::string TypeStatisticKey = StringFormat("Player/TotalMultiplaySessions/PartyPlayerId=%u", Info.player_id());
-        Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+        Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
     }
 
     Frpg2RequestMessage::EmptyResponse Response;

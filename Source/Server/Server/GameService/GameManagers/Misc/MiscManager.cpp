@@ -16,6 +16,9 @@
 #include "Config/RuntimeConfig.h"
 #include "Server/Server.h"
 
+#include "Config/BuildConfig.h"
+#include "Server/GameService/Utils/NRSSRSanitizer.h"
+
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/Strings.h"
 
@@ -81,14 +84,14 @@ MessageHandleResult MiscManager::Handle_RequestNotifyRingBell(GameClient* Client
     };
 
     std::vector<std::shared_ptr<GameClient>> PotentialTargets = GameServiceInstance->FindClients([Client, Request, NotifyLocations](const std::shared_ptr<GameClient>& OtherClient) {
-        return NotifyLocations.count(OtherClient->GetPlayerState().CurrentArea) > 0;
+        return NotifyLocations.count(OtherClient->GetPlayerState().GetCurrentArea()) > 0;
     });
 
     for (std::shared_ptr<GameClient>& OtherClient : PotentialTargets)
     {
         Frpg2RequestMessage::PushRequestNotifyRingBell PushMessage;
         PushMessage.set_push_message_id(Frpg2RequestMessage::PushID_PushRequestNotifyRingBell);
-        PushMessage.set_player_id(Player.PlayerId);
+        PushMessage.set_player_id(Player.GetPlayerId());
         PushMessage.set_online_area_id(Request->online_area_id());
         PushMessage.set_data(Request->data().data(), Request->data().size());
 
@@ -100,13 +103,18 @@ MessageHandleResult MiscManager::Handle_RequestNotifyRingBell(GameClient* Client
 
     std::string TypeStatisticKey = StringFormat("Bell/TotalBellRings");
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
 
     Frpg2RequestMessage::RequestNotifyRingBellResponse Response;
     if (!Client->MessageStream->Send(&Response, &Message))
     {
         WarningS(Client->GetName().c_str(), "Disconnecting client as failed to send RequestNotifyRingBellResponse response.");
         return MessageHandleResult::Error;
+    }
+
+    if (ServerInstance->GetConfig().SendDiscordNotice_Bell)
+    {
+        ServerInstance->SendDiscordNotice(Client->shared_from_this(), DiscordNoticeType::Bell, "Rung archdragon bell.");
     }
 
     return MessageHandleResult::Handled;
@@ -121,20 +129,60 @@ MessageHandleResult MiscManager::Handle_RequestSendMessageToPlayers(GameClient* 
     std::vector<uint8_t> MessageData;
     MessageData.assign(Request->message().data(), Request->message().data() + Request->message().size());
 
-    for (int i = 0; i < Request->player_ids_size(); i++)
+    // RequestSendMessageToPlayers sanity checks (patch CVE-2022-24125)
+    // The game seems to only use this function in the BreakIn (invasions) implementation.
+    // Hence we should make sure that a malicious client does not use this send arbitrary data to other players.
+    bool ShouldProcessRequest = true;
+    if constexpr (BuildConfig::SEND_MESSAGE_TO_PLAYERS_SANITY_CHECKS)
     {
-        uint32_t PlayerId = Request->player_ids(i);
+        // The request should contain a PushRequestBreakInTarget message
+        Frpg2RequestMessage::PushRequestAllowBreakInTarget EmbdeddedMsg;
 
-        std::shared_ptr<GameClient> TargetClient = GameServiceInstance->FindClientByPlayerId(PlayerId);
-        if (!TargetClient)
+        // The request should specify exactly one player
+        if (Request->player_ids_size() > 1)
         {
-            WarningS(Client->GetName().c_str(), "Client attempted to send message to other client %i, but client doesn't exist.", PlayerId);
+            WarningS(Client->GetName().c_str(), "Client attempted to send message to more than one (%i) client. This is not normal behaviour.", Request->player_ids_size());
+            ShouldProcessRequest = false;
         }
-        else
+        // The request should only ever contain a PushRequestAllowBreakInTarget message
+        if (!EmbdeddedMsg.ParseFromString(Request->message()) || EmbdeddedMsg.push_message_id() != Frpg2RequestMessage::PushMessageId::PushID_PushRequestAllowBreakInTarget)
         {
-            if (!TargetClient->MessageStream->SendRawProtobuf(MessageData))
+            WarningS(Client->GetName().c_str(), "RequestSendMessageToPlayers embedded message provided by client is not a valid PushRequestAllowBreakInTarget message.");
+            ShouldProcessRequest = false;
+        }
+        // Make sure the NRSSR data contained within this message is valid (if the CVE-2022-24126 fix is enabled)
+        else if constexpr (BuildConfig::NRSSR_SANITY_CHECKS)
+        {
+            auto ValidationResult = NRSSRSanitizer::ValidateEntryList(EmbdeddedMsg.player_struct().data(), EmbdeddedMsg.player_struct().size());
+            if (ValidationResult != NRSSRSanitizer::ValidationResult::Valid)
             {
-                WarningS(Client->GetName().c_str(), "Failed to send raw protobuf from RequestSendMessageToPlayers to %s.", TargetClient->GetName().c_str());
+                WarningS(Client->GetName().c_str(), "PushRequestAllowBreakInTarget message recieved from client contains ill formated binary data (error code %i).",
+                    static_cast<uint32_t>(ValidationResult));
+
+                Client->GetPlayerState().GetAntiCheatState_Mutable().ExploitDetected = true;
+
+                ShouldProcessRequest = false;
+            }
+        }
+    }
+
+    if (ShouldProcessRequest)
+    {
+        for (int i = 0; i < Request->player_ids_size(); i++)
+        {
+            uint32_t PlayerId = Request->player_ids(i);
+
+            std::shared_ptr<GameClient> TargetClient = GameServiceInstance->FindClientByPlayerId(PlayerId);
+            if (!TargetClient)
+            {
+                WarningS(Client->GetName().c_str(), "Client attempted to send message to other client %i, but client doesn't exist.", PlayerId);
+            }
+            else
+            {
+                if (!TargetClient->MessageStream->SendRawProtobuf(MessageData))
+                {
+                    WarningS(Client->GetName().c_str(), "Failed to send raw protobuf from RequestSendMessageToPlayers to %s.", TargetClient->GetName().c_str());
+                }
             }
         }
     }

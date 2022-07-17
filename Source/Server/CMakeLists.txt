@@ -1,5 +1,5 @@
 # ================================================================================================
-#  DS2OS
+#  DS3OS
 #  Copyright (C) 2021 Tim Leonard
 # ================================================================================================
 
@@ -39,15 +39,15 @@ SET(SOURCES
     Core/Network/NetUtils.h
     Core/Utils/Compression.cpp
     Core/Utils/Compression.h
-    #Core/Utils/DebugCounter.cpp
-    #Core/Utils/DebugCounter.h
-    #Core/Utils/DebugObjects.cpp
-    #Core/Utils/DebugObjects.h
-    #Core/Utils/DebugObjects.inc
-    #Core/Utils/DebugTimer.cpp
-    #Core/Utils/DebugTimer.h
-    #Core/Utils/DiffTracker.cpp
-    #Core/Utils/DiffTracker.h
+    Core/Utils/DebugCounter.cpp
+    Core/Utils/DebugCounter.h
+    Core/Utils/DebugObjects.cpp
+    Core/Utils/DebugObjects.h
+    Core/Utils/DebugObjects.inc
+    Core/Utils/DebugTimer.cpp
+    Core/Utils/DebugTimer.h
+    Core/Utils/DiffTracker.cpp
+    Core/Utils/DiffTracker.h
     Core/Utils/Endian.h
     Core/Utils/Enum.h
     Core/Utils/EnumDef.inc
@@ -110,20 +110,20 @@ SET(SOURCES
     Server/GameService/GameManagers/Signs/SignManager.h
     Server/GameService/GameManagers/Visitor/VisitorManager.cpp
     Server/GameService/GameManagers/Visitor/VisitorManager.h
-    #Server/GameService/GameManagers/AntiCheat/AntiCheatManager.cpp
-    #Server/GameService/GameManagers/AntiCheat/AntiCheatManager.h
-    #Server/GameService/GameManagers/AntiCheat/AntiCheatTrigger.cpp
-    #Server/GameService/GameManagers/AntiCheat/AntiCheatTrigger.h
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ClientFlagged.cpp
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ClientFlagged.h
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_Exploit.cpp
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_Exploit.h
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ImpossibleStats.cpp
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ImpossibleStats.h
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_InvalidName.cpp
-    #Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_InvalidName.h
+    Server/GameService/GameManagers/AntiCheat/AntiCheatManager.cpp
+    Server/GameService/GameManagers/AntiCheat/AntiCheatManager.h
+    Server/GameService/GameManagers/AntiCheat/AntiCheatTrigger.cpp
+    Server/GameService/GameManagers/AntiCheat/AntiCheatTrigger.h
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ClientFlagged.cpp
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ClientFlagged.h
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_Exploit.cpp
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_Exploit.h
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ImpossibleStats.cpp
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_ImpossibleStats.h
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_InvalidName.cpp
+    Server/GameService/GameManagers/AntiCheat/Triggers/AntiCheatTrigger_InvalidName.h
     Server/GameService/Utils/GameIds.h
-    #Server/GameService/Utils/NRSSRSanitizer.h
+    Server/GameService/Utils/NRSSRSanitizer.h
     Server/GameService/Utils/OnlineAreaPool.h
     Server/GameService/Utils/Ids/BonfireId.inc
     Server/GameService/Utils/Ids/CharacterTypeId.inc
@@ -136,7 +136,7 @@ SET(SOURCES
     Server/GameService/Utils/Ids/ItemId.inc
     Server/GameService/Utils/Ids/OnlineAreaId.inc
     Server/GameService/Utils/Ids/TeamTypeId.inc
-    #Server/GameService/Utils/Ids/BossId.inc
+    Server/GameService/Utils/Ids/BossId.inc
     Server/LoginService/LoginClient.cpp
     Server/LoginService/LoginClient.h
     Server/LoginService/LoginService.cpp
@@ -167,12 +167,12 @@ SET(SOURCES
     Server/WebUIService/WebUIService.h
     Server/WebUIService/Handlers/AuthHandler.cpp
     Server/WebUIService/Handlers/AuthHandler.h
-    #Server/WebUIService/Handlers/DebugStatisticsHandler.cpp
-    #Server/WebUIService/Handlers/DebugStatisticsHandler.h
+    Server/WebUIService/Handlers/DebugStatisticsHandler.cpp
+    Server/WebUIService/Handlers/DebugStatisticsHandler.h
     Server/WebUIService/Handlers/MessageHandler.cpp
     Server/WebUIService/Handlers/MessageHandler.h
-    #Server/WebUIService/Handlers/BansHandler.cpp
-    #Server/WebUIService/Handlers/BansHandler.h
+    Server/WebUIService/Handlers/BansHandler.cpp
+    Server/WebUIService/Handlers/BansHandler.h
     Server/WebUIService/Handlers/PlayersHandler.cpp
     Server/WebUIService/Handlers/PlayersHandler.h
     Server/WebUIService/Handlers/SettingsHandler.cpp

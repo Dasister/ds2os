@@ -9,10 +9,12 @@
 
 #include "Server/Server.h"
 #include "Client/Client.h"
+#include "Config/BuildConfig.h"
 #include "Core/Utils/Logging.h"
 #include "Platform/Platform.h"
 
 #include <filesystem>
+#include <thread>
 
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
@@ -62,17 +64,18 @@ int main(int argc, char* argv[])
             Error("Failed to initialize steam api, please ensure steam is running.");
             return 1;
         }
-        SteamUtils()->SetWarningMessageHook(&SteamWarningHook);
 
+        SteamUtils()->SetWarningMessageHook(&SteamWarningHook);
     }
     else
     {
         // Ports etc are irrelevant, we're only using the api to do authentication. 
-        if (!SteamGameServer_Init(0, 50000, 50000, eServerModeAuthentication, "1.0.0.0"))
+        if (!SteamGameServer_Init(0, 50001, 50002, eServerModeAuthentication, "1.0.0.0"))
         {
             Error("Failed to initialize steam game server api.");
             return 1;
         }
+
         SteamGameServerUtils()->SetWarningMessageHook(&SteamWarningHook);
     }
 
@@ -80,17 +83,34 @@ int main(int argc, char* argv[])
     // TODO: Also do less crappy arg parsing.
     if (start_as_client_emulator)
     {
-        Client ClientInstance;
-        if (!ClientInstance.Init())
+        std::array<std::thread, BuildConfig::CLIENT_EMULATOR_COUNT> ClientThreads;
+
+        for (size_t i = 0; i < BuildConfig::CLIENT_EMULATOR_COUNT; i++)
         {
-            Error("Client emulator failed to initialize.");
-            return 1;
+            ClientThreads[i] = std::thread([i]() {
+
+                Client ClientInstance;
+
+                if (!ClientInstance.Init(true, i))
+                {
+                    Error("Client emulator failed to initialize.");
+                    return;
+                }
+
+                ClientInstance.RunUntilQuit();
+                
+                if (!ClientInstance.Term())
+                {
+                    Error("Client emulator failed to terminate.");
+                    return;
+                }
+
+            });            
         }
-        ClientInstance.RunUntilQuit();
-        if (!ClientInstance.Term())
+
+        for (size_t i = 0; i < BuildConfig::CLIENT_EMULATOR_COUNT; i++)
         {
-            Error("Client emulator failed to terminate.");
-            return 1;
+            ClientThreads[i].join();
         }
     }
     else

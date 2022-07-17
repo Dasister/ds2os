@@ -45,11 +45,16 @@ bool SettingsHandler::handleGet(CivetServer* Server, struct mg_connection* Conne
     json["privateHostname"] = Config.ServerPrivateHostname;
     json["advertise"] = Config.Advertise;
     json["disableCoop"] = Config.DisableCoop;
+    json["disableBloodMessages"] = Config.DisableBloodMessages;
+    json["disableBloodStains"] = Config.DisableBloodStains;
+    json["disableGhosts"] = Config.DisableGhosts;
     json["disableInvasions"] = Config.DisableInvasions;
     json["disableAutoSummonCoop"] = Config.DisableCoopAutoSummon;
     json["disableAutoSummonInvasions"] = Config.DisableInvasionAutoSummon;
     json["disableWeaponLevelMatching"] = IsWeaponLevelMatchingDisabled();
     json["disableSoulLevelMatching"] = IsSoulLevelMatchingDisabled();
+    json["ignoreInvasionAreaFilter"] = Config.IgnoreInvasionAreaFilter;
+    json["antiCheatEnabled"] = Config.AntiCheatEnabled;
     
     RespondJson(Connection, json);
 
@@ -105,6 +110,18 @@ bool SettingsHandler::handlePost(CivetServer* Server, struct mg_connection* Conn
     {
         Config.DisableInvasions = json["disableInvasions"];
     }
+    if (json.contains("disableBloodMessages"))
+    {
+        Config.DisableBloodMessages = json["disableBloodMessages"];
+    }
+    if (json.contains("disableBloodStains"))
+    {
+        Config.DisableBloodStains = json["disableBloodStains"];
+    }
+    if (json.contains("disableGhosts"))
+    {
+        Config.DisableGhosts = json["disableGhosts"];
+    }
     if (json.contains("disableAutoSummonCoop"))
     {
         Config.DisableCoopAutoSummon = json["disableAutoSummonCoop"];
@@ -112,6 +129,14 @@ bool SettingsHandler::handlePost(CivetServer* Server, struct mg_connection* Conn
     if (json.contains("disableAutoSummonInvasions"))
     {
         Config.DisableInvasionAutoSummon = json["disableAutoSummonInvasions"];
+    }
+    if (json.contains("ignoreInvasionAreaFilter"))
+    {
+        Config.IgnoreInvasionAreaFilter = json["ignoreInvasionAreaFilter"];
+    }
+    if (json.contains("antiCheatEnabled"))
+    {
+        Config.AntiCheatEnabled = json["antiCheatEnabled"];
     }
     if (json.contains("disableWeaponLevelMatching"))
     {

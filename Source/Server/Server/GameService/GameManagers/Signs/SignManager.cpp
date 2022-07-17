@@ -16,9 +16,15 @@
 #include "Config/RuntimeConfig.h"
 #include "Server/Server.h"
 
+#include "Config/BuildConfig.h"
+#include "Server/GameService/Utils/NRSSRSanitizer.h"
+
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/File.h"
 #include "Core/Utils/Strings.h"
+#include "Core/Utils/DiffTracker.h"
+
+#include <cmath>
 
 SignManager::SignManager(Server* InServerInstance, GameService* InGameServiceInstance)
     : ServerInstance(InServerInstance)
@@ -32,9 +38,34 @@ void SignManager::OnLostPlayer(GameClient* Client)
     // Remove all the players signs from the cache.
     for (std::shared_ptr<SummonSign> Sign : Client->ActiveSummonSigns)
     {
-        LiveCache.Remove(Sign->OnlineAreaId, Sign->SignId);
+        RemoveSignAndNotifyAware(Sign);
     }
     Client->ActiveSummonSigns.clear();
+}
+
+void SignManager::RemoveSignAndNotifyAware(const std::shared_ptr<SummonSign>& Sign)
+{
+    LiveCache.Remove((OnlineAreaId)Sign->OnlineAreaId, Sign->SignId);
+
+    // Tell anyone who is aware of this sign that its been removed.
+    for (uint32_t AwarePlayerId : Sign->AwarePlayerIds)
+    {
+        if (std::shared_ptr<GameClient> OtherClient = GameServiceInstance->FindClientByPlayerId(AwarePlayerId))
+        {
+            Frpg2RequestMessage::PushRequestRemoveSign PushMessage;
+            PushMessage.set_push_message_id(Frpg2RequestMessage::PushID_PushRequestRemoveSign);
+            PushMessage.mutable_message()->set_player_id(Sign->PlayerId);
+            PushMessage.mutable_message()->set_sign_id(Sign->SignId);
+
+            if (!OtherClient->MessageStream->Send(&PushMessage))
+            {
+                WarningS(OtherClient->GetName().c_str(), "Failed to send PushRequestRemoveSign to aware player.");
+            }
+        }
+    }
+
+    Sign->BeingSummonedByPlayerId = 0;
+    Sign->AwarePlayerIds.clear();
 }
 
 void SignManager::Poll()
@@ -112,7 +143,27 @@ MessageHandleResult SignManager::Handle_RequestGetSignList(GameClient* Client, c
     Frpg2RequestMessage::RequestGetSignList* Request = (Frpg2RequestMessage::RequestGetSignList*)Message.Protobuf.get();
     Frpg2RequestMessage::RequestGetSignListResponse Response;
 
+#ifdef _DEBUG
+    static DiffTracker Tracker;
+    Tracker.Field(Player.GetCharacterName().c_str(), "MatchingParameters.unknown_id_2", Request->matching_parameter().unknown_id_2());
+    Tracker.Field(Player.GetCharacterName().c_str(), "MatchingParameters.unknown_id_5", Request->matching_parameter().unknown_id_5());
+    if (Request->matching_parameter().has_unknown_string())
+    {
+        Tracker.Field(Player.GetCharacterName().c_str(), "MatchingParameters.unknown_string", Request->matching_parameter().unknown_string());
+    }
+    if (Request->matching_parameter().has_unknown_id_15())
+    {
+        Tracker.Field(Player.GetCharacterName().c_str(), "MatchingParameters.unknown_id_15", Request->matching_parameter().unknown_id_15());
+    }
+    Tracker.Field(Player.GetCharacterName().c_str(), "RequestGetSignList.unknown_id_1", Request->unknown_id_1());
+    Tracker.Field(Player.GetCharacterName().c_str(), "SignGetFlags.unknown_id_1", Request->sign_get_flags().unknown_id_1());
+    Tracker.Field(Player.GetCharacterName().c_str(), "SignGetFlags.unknown_id_2", Request->sign_get_flags().unknown_id_2());
+    Tracker.Field(Player.GetCharacterName().c_str(), "SignGetFlags.unknown_id_3", Request->sign_get_flags().unknown_id_3());
+#endif
+
     uint32_t RemainingSignCount = Request->max_signs();
+
+    Frpg2RequestMessage::GetSignResult* SignResult = Response.mutable_get_sign_result();
 
     // Grab as many recent signs as we can from the cache that match our matching criteria.
     for (int i = 0; i < Request->search_areas_size() && RemainingSignCount > 0; i++)
@@ -134,12 +185,10 @@ MessageHandleResult SignManager::Handle_RequestGetSignList(GameClient* Client, c
             return CanMatchWith(Request->matching_parameter(), Sign->MatchingParameters, Sign->IsRedSign);
         });
 
-        Frpg2RequestMessage::GetSignResult* SignResult = Response.mutable_get_sign_result();
-
         for (std::shared_ptr<SummonSign>& Sign : AreaSigns)
         {
             // Filter players own signs.
-            if (Sign->PlayerId == Player.PlayerId)
+            if (Sign->PlayerId == Player.GetPlayerId())
             {
                 continue;
             }
@@ -163,6 +212,9 @@ MessageHandleResult SignManager::Handle_RequestGetSignList(GameClient* Client, c
                 SignData->set_is_red_sign(Sign->IsRedSign);
             }
 
+            // Make sure user is marked as aware of the sign so we can clear up when the sign is removed.
+            Sign->AwarePlayerIds.insert(Player.GetPlayerId());
+
             RemainingSignCount--;
         }
     }
@@ -183,11 +235,27 @@ MessageHandleResult SignManager::Handle_RequestCreateSign(GameClient* Client, co
 
     Frpg2RequestMessage::RequestCreateSign* Request = (Frpg2RequestMessage::RequestCreateSign*)Message.Protobuf.get();
 
+    // There is no NRSSR struct in the sign metadata, but we still make sure the size-delimited entry list is valid.
+    if constexpr (BuildConfig::NRSSR_SANITY_CHECKS)
+    {
+        auto ValidationResult = NRSSRSanitizer::ValidateEntryList(Request->player_struct().data(), Request->player_struct().size());
+        if (ValidationResult != NRSSRSanitizer::ValidationResult::Valid)
+        {
+            WarningS(Client->GetName().c_str(), "RequestCreateSign message recieved from client contains ill formated binary data (error code %i).",
+                static_cast<uint32_t>(ValidationResult));
+
+            Client->GetPlayerState().GetAntiCheatState_Mutable().ExploitDetected = true;
+
+            // Simply ignore the request. Perhaps sending a response with an invalid sign id or disconnecting the client would be better?
+            return MessageHandleResult::Handled;
+        }
+    }
+
     std::shared_ptr<SummonSign> Sign = std::make_shared<SummonSign>();
     Sign->SignId = NextSignId++;
     Sign->OnlineAreaId = (OnlineAreaId)Request->online_area_id();
-    Sign->PlayerId = Player.PlayerId;
-    Sign->PlayerSteamId = Player.SteamId;
+    Sign->PlayerId = Player.GetPlayerId();
+    Sign->PlayerSteamId = Player.GetSteamId();
     Sign->IsRedSign = Request->is_red_sign();
     Sign->PlayerStruct.assign(Request->player_struct().data(), Request->player_struct().data() + Request->player_struct().size());
     Sign->MatchingParameters = Request->matching_parameter();
@@ -200,12 +268,41 @@ MessageHandleResult SignManager::Handle_RequestCreateSign(GameClient* Client, co
 
     std::string TypeStatisticKey = StringFormat("Sign/TotalCreated");
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
 
     if (!Client->MessageStream->Send(&Response, &Message))
     {
         WarningS(Client->GetName().c_str(), "Disconnecting client as failed to send RequestGetSignListResponse response.");
         return MessageHandleResult::Error;
+    }
+
+    if (ServerInstance->GetConfig().SendDiscordNotice_SummonSign)
+    {
+        if (Sign->MatchingParameters.password().empty())
+        {
+            if (Sign->IsRedSign)
+            {
+                ServerInstance->SendDiscordNotice(Client->shared_from_this(), DiscordNoticeType::SummonSignPvP,
+                    StringFormat("Placed a public red summon sign in '%s'.", GetEnumString(Sign->OnlineAreaId).c_str()),
+                    0,
+                    {
+                        { "Soul Level", std::to_string(Client->GetPlayerState().GetSoulLevel()), true },
+                        { "Weapon Level", std::to_string(Client->GetPlayerState().GetMaxWeaponLevel()), true }
+                    }
+                );
+            }
+            else
+            {
+                ServerInstance->SendDiscordNotice(Client->shared_from_this(), DiscordNoticeType::SummonSign, 
+                    StringFormat("Placed a public summon sign in '%s'.", GetEnumString(Sign->OnlineAreaId).c_str()),
+                    0,
+                    {
+                        { "Soul Level", std::to_string(Client->GetPlayerState().GetSoulLevel()), true },
+                        { "Weapon Level", std::to_string(Client->GetPlayerState().GetMaxWeaponLevel()), true }
+                    }
+                );
+            }
+        }
     }
 
     return MessageHandleResult::Handled;
@@ -232,31 +329,8 @@ MessageHandleResult SignManager::Handle_RequestRemoveSign(GameClient* Client, co
         return MessageHandleResult::Error;
     }
 
-    LiveCache.Remove((OnlineAreaId)Request->online_area_id(), Request->sign_id());
-
-    // If anyone is trying to summon this sign right now, send them a notice that its been removed.
-    if (Sign->BeingSummonedByPlayerId != 0)
-    {
-        if (std::shared_ptr<GameClient> OtherClient = GameServiceInstance->FindClientByPlayerId(Sign->BeingSummonedByPlayerId))
-        {
-            Frpg2RequestMessage::PushRequestRemoveSign PushMessage;
-            PushMessage.set_push_message_id(Frpg2RequestMessage::PushID_PushRequestRemoveSign);
-            PushMessage.mutable_message()->set_player_id(Sign->PlayerId);
-            PushMessage.mutable_message()->set_sign_id(Sign->SignId);
-
-            if (!OtherClient->MessageStream->Send(&PushMessage))
-            {
-                WarningS(Client->GetName().c_str(), "Failed to send PushRequestRemoveSign to summoner.");
-                return MessageHandleResult::Error;
-            }
-        }
-        else
-        {
-            WarningS(Client->GetName().c_str(), "PlayerId summoning sign no longer exists, nothing to reject.");
-        }
-
-        Sign->BeingSummonedByPlayerId = 0;
-    }
+    // Tell anyone who is aware of this sign that its been removed.
+    RemoveSignAndNotifyAware(Sign);
 
     // Empty response, not sure what purpose this serves really other than saying message-recieved. Client
     // doesn't work without it though.
@@ -298,6 +372,21 @@ MessageHandleResult SignManager::Handle_RequestSummonSign(GameClient* Client, co
 
     bool bSuccess = true;
 
+    // Make sure the NRSSR data contained within this message is valid (if the CVE-2022-24126 fix is enabled)
+    if constexpr (BuildConfig::NRSSR_SANITY_CHECKS)
+    {
+        auto ValidationResult = NRSSRSanitizer::ValidateEntryList(Request->player_struct().data(), Request->player_struct().size());
+        if (ValidationResult != NRSSRSanitizer::ValidationResult::Valid)
+        {
+            Client->GetPlayerState().GetAntiCheatState_Mutable().ExploitDetected = true;
+
+            WarningS(Client->GetName().c_str(), "RequestSummonSign message recieved from client contains ill formated binary data (error code %i).",
+                static_cast<uint32_t>(ValidationResult));
+
+            bSuccess = false;
+        }
+    }
+
     // First check the sign still exists, if it doesn't, send a reject message as its probably already used.
     std::shared_ptr<SummonSign> Sign = LiveCache.Find((OnlineAreaId)Request->online_area_id(), Request->sign_info().sign_id());
     if (!Sign)
@@ -321,8 +410,8 @@ MessageHandleResult SignManager::Handle_RequestSummonSign(GameClient* Client, co
 
         Frpg2RequestMessage::PushRequestSummonSign PushMessage;
         PushMessage.set_push_message_id(Frpg2RequestMessage::PushID_PushRequestSummonSign);
-        PushMessage.mutable_message()->set_player_id(Player.PlayerId);
-        PushMessage.mutable_message()->set_steam_id(Player.SteamId);
+        PushMessage.mutable_message()->set_player_id(Player.GetPlayerId());
+        PushMessage.mutable_message()->set_steam_id(Player.GetSteamId());
         PushMessage.mutable_message()->mutable_sign_info()->set_sign_id(Sign->SignId);
         PushMessage.mutable_message()->mutable_sign_info()->set_player_id(Sign->PlayerId);
         PushMessage.mutable_message()->set_player_struct(Request->player_struct().data(), Request->player_struct().size());
@@ -334,7 +423,7 @@ MessageHandleResult SignManager::Handle_RequestSummonSign(GameClient* Client, co
         }
         else
         {
-            Sign->BeingSummonedByPlayerId = Player.PlayerId;
+            Sign->BeingSummonedByPlayerId = Player.GetPlayerId();
         }
     }
 
@@ -365,11 +454,11 @@ MessageHandleResult SignManager::Handle_RequestSummonSign(GameClient* Client, co
     {
         std::string PoolStatisticKey = StringFormat("Sign/TotalSummonsRequested/IsRedSign=%u", (uint32_t)Sign->IsRedSign);
         Database.AddGlobalStatistic(PoolStatisticKey, 1);
-        Database.AddPlayerStatistic(PoolStatisticKey, Player.PlayerId, 1);
+        Database.AddPlayerStatistic(PoolStatisticKey, Player.GetPlayerId(), 1);
 
         std::string TypeStatisticKey = StringFormat("Sign/TotalSummonsRequested");
         Database.AddGlobalStatistic(TypeStatisticKey, 1);
-        Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+        Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
     }
 
     return MessageHandleResult::Handled;
@@ -444,9 +533,9 @@ MessageHandleResult SignManager::Handle_RequestGetRightMatchingArea(GameClient* 
 
     for (std::shared_ptr<GameClient>& OtherClient : GameServiceInstance->GetClients())
     {
-        int OtherSoulLevel = OtherClient->GetPlayerState().SoulLevel;
-        int OtherWeaponLevel = OtherClient->GetPlayerState().MaxWeaponLevel;
-        OnlineAreaId OtherArea = OtherClient->GetPlayerState().CurrentArea;
+        int OtherSoulLevel = OtherClient->GetPlayerState().GetSoulLevel();
+        int OtherWeaponLevel = OtherClient->GetPlayerState().GetMaxWeaponLevel();
+        OnlineAreaId OtherArea = OtherClient->GetPlayerState().GetCurrentArea();
 
         if (OtherArea == OnlineAreaId::None)
         {
@@ -479,7 +568,7 @@ MessageHandleResult SignManager::Handle_RequestGetRightMatchingArea(GameClient* 
     // Normalize the values to the 0-5 range the client expects and return them.
     for (auto Pair : PotentialAreas)
     {
-        int NormalizedPopulation = (int)std::ceilf((Pair.second / (float)MaxAreaPopulation) * 5.0f);
+        int NormalizedPopulation = (int)std::ceil((Pair.second / (float)MaxAreaPopulation) * 5.0f);
 
         Frpg2RequestMessage::RequestGetRightMatchingAreaResponse_Area_info& Info = *Response.add_area_info();
         Info.set_online_area_id((uint32_t)Pair.first);

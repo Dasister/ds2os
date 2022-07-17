@@ -15,6 +15,9 @@
 #include "Config/RuntimeConfig.h"
 #include "Server/Server.h"
 
+#include "Config/BuildConfig.h"
+#include "Server/GameService/Utils/NRSSRSanitizer.h"
+
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/Strings.h"
 
@@ -91,7 +94,32 @@ MessageHandleResult BloodstainManager::Handle_RequestCreateBloodstain(GameClient
     Data.assign(Request->data().data(), Request->data().data() + Request->data().size());
     GhostData.assign(Request->ghost_data().data(), Request->ghost_data().data() + Request->ghost_data().size());
 
-    if (std::shared_ptr<Bloodstain> ActiveStain = Database.CreateBloodstain((OnlineAreaId)Request->online_area_id(), Player.PlayerId, Player.SteamId, Data, GhostData))
+    // There is no NRSSR struct in bloodstain or ghost data, but we still make sure the size-delimited entry list is valid.
+    if constexpr (BuildConfig::NRSSR_SANITY_CHECKS)
+    {
+        auto ValidationResult = NRSSRSanitizer::ValidateEntryList(Data.data(), Data.size());
+        if (ValidationResult != NRSSRSanitizer::ValidationResult::Valid)
+        {
+            WarningS(Client->GetName().c_str(), "Bloodstain metadata recieved from client is invalid (error code %i).",
+                static_cast<uint32_t>(ValidationResult));
+
+            Client->GetPlayerState().GetAntiCheatState_Mutable().ExploitDetected = true;
+
+            return MessageHandleResult::Handled;
+        }
+        ValidationResult = NRSSRSanitizer::ValidateEntryList(GhostData.data(), GhostData.size());
+        if (ValidationResult != NRSSRSanitizer::ValidationResult::Valid)
+        {
+            WarningS(Client->GetName().c_str(), "Ghost data recieved from client is invalid (error code %i).",
+                static_cast<uint32_t>(ValidationResult));
+
+            Client->GetPlayerState().GetAntiCheatState_Mutable().ExploitDetected = true;
+
+            return MessageHandleResult::Handled;
+        }
+    }
+
+    if (std::shared_ptr<Bloodstain> ActiveStain = Database.CreateBloodstain((OnlineAreaId)Request->online_area_id(), Player.GetPlayerId(), Player.GetSteamId(), Data, GhostData))
     {
         LiveCache.Add(ActiveStain->OnlineAreaId, ActiveStain->BloodstainId, ActiveStain);
     }
@@ -103,44 +131,49 @@ MessageHandleResult BloodstainManager::Handle_RequestCreateBloodstain(GameClient
 
     std::string TypeStatisticKey = StringFormat("Bloodstain/TotalCreated");
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
 
     return MessageHandleResult::Handled;
 }
 
 MessageHandleResult BloodstainManager::Handle_RequestGetBloodstainList(GameClient* Client, const Frpg2ReliableUdpMessage& Message)
 {
+    const RuntimeConfig& Config = ServerInstance->GetConfig();
     PlayerState& Player = Client->GetPlayerState();
 
     Frpg2RequestMessage::RequestGetBloodstainList* Request = (Frpg2RequestMessage::RequestGetBloodstainList*)Message.Protobuf.get();
     Frpg2RequestMessage::RequestGetBloodstainListResponse Response;
+    Response.mutable_bloodstains();
 
     uint32_t RemainingStainCount = Request->max_stains();
 
-    // Grab a random set of stains from the live cache.
-    for (int i = 0; i < Request->search_areas_size() && RemainingStainCount > 0; i++)
+    if (!Config.DisableBloodStains)
     {
-        const Frpg2RequestMessage::DomainLimitData& Area = Request->search_areas(i);
-
-        OnlineAreaId AreaId = (OnlineAreaId)Area.online_area_id();
-        uint32_t MaxForArea = Area.max_items();
-        uint32_t GatherCount = std::min(MaxForArea, RemainingStainCount);
-
-        std::vector<std::shared_ptr<Bloodstain>> AreaStains = LiveCache.GetRandomSet(AreaId, GatherCount);
-        for (std::shared_ptr<Bloodstain>& AreaMsg : AreaStains)
+        // Grab a random set of stains from the live cache.
+        for (int i = 0; i < Request->search_areas_size() && RemainingStainCount > 0; i++)
         {
-            // Filter players own messages.
-            if (AreaMsg->PlayerId == Player.PlayerId)
-            {
-                continue;
-            }
+            const Frpg2RequestMessage::DomainLimitData& Area = Request->search_areas(i);
 
-            Frpg2RequestMessage::BloodstainInfo& Data = *Response.mutable_bloodstains()->Add();
-            Data.set_online_area_id((uint32_t)AreaMsg->OnlineAreaId);
-            Data.set_bloodstain_id((uint32_t)AreaMsg->BloodstainId);
-            Data.set_data(AreaMsg->Data.data(), AreaMsg->Data.size());
+            OnlineAreaId AreaId = (OnlineAreaId)Area.online_area_id();
+            uint32_t MaxForArea = Area.max_items();
+            uint32_t GatherCount = std::min(MaxForArea, RemainingStainCount);
+
+            std::vector<std::shared_ptr<Bloodstain>> AreaStains = LiveCache.GetRandomSet(AreaId, GatherCount);
+            for (std::shared_ptr<Bloodstain>& AreaMsg : AreaStains)
+            {
+                // Filter players own messages.
+                if (AreaMsg->PlayerId == Player.GetPlayerId())
+                {
+                    continue;
+                }
+
+                Frpg2RequestMessage::BloodstainInfo& Data = *Response.mutable_bloodstains()->Add();
+                Data.set_online_area_id((uint32_t)AreaMsg->OnlineAreaId);
+                Data.set_bloodstain_id((uint32_t)AreaMsg->BloodstainId);
+                Data.set_data(AreaMsg->Data.data(), AreaMsg->Data.size());
             
-            RemainingStainCount--;
+                RemainingStainCount--;
+            }
         }
     }
 

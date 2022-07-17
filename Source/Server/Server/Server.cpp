@@ -8,15 +8,19 @@
  */
 
 #include "Server/Server.h"
+#include "Server/Config/BuildConfig.h"
 #include "Server/Database/ServerDatabase.h"
 #include "Server/Service.h"
 #include "Server/LoginService/LoginService.h"
 #include "Server/AuthService/AuthService.h"
 #include "Server/GameService/GameService.h"
+#include "Server/GameService/GameClient.h"
 #include "Server/WebUIService/WebUIService.h"
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/File.h"
 #include "Core/Utils/Strings.h"
+#include "Core/Utils/Random.h"
+#include "Core/Utils/DebugObjects.h"
 #include "Core/Network/NetUtils.h"
 #include "Core/Network/NetHttpRequest.h"
 
@@ -35,7 +39,7 @@ Server::Server()
     SavedPath = std::filesystem::current_path() / std::filesystem::path("Saved");
     PrivateKeyPath = SavedPath / std::filesystem::path("private.key");
     PublicKeyPath = SavedPath / std::filesystem::path("public.key");
-    Ds3osconfigPath = SavedPath / std::filesystem::path("server.ds2osconfig");
+    Ds3osconfigPath = SavedPath / std::filesystem::path("server.ds3osconfig");
     ConfigPath = SavedPath / std::filesystem::path("config.json");
     DatabasePath = SavedPath / std::filesystem::path("database.sqlite");
 
@@ -87,6 +91,12 @@ bool Server::Init()
             Error("Failed to save configuration file: %s", ConfigPath.string().c_str());
             return false;
         }
+    }
+
+    // Patch old server ip.
+    if (Config.MasterServerIp == "timleonard.uk")
+    {
+        Config.MasterServerIp = "ds3os-master.timleonard.uk";
     }
 
     // Generate server encryption keypair if it doesn't already exists.
@@ -191,16 +201,31 @@ bool Server::Init()
             return false;
         }
     }
-
+    
 #define WriteState(State, bEnabled) WriteLog(bEnabled ? ConsoleColor::Green : ConsoleColor::Red, "", "Log", "%-25s: %s", State, bEnabled ? "Enabled" : "Disabled");
-    // WriteState("Blood Messages", !Config.DisableBloodMessages);
-    // WriteState("Blood Stains", !Config.DisableBloodStains);
-    // WriteState("Blood Ghosts", !Config.DisableGhosts);
+    WriteState("Blood Messages", !Config.DisableBloodMessages);
+    WriteState("Blood Stains", !Config.DisableBloodStains);
+    WriteState("Blood Ghosts", !Config.DisableGhosts);
     WriteState("Invasions (Auto Summon)", !Config.DisableInvasionAutoSummon);
     WriteState("Invasions", !Config.DisableInvasions);
     WriteState("Coop (Auto Summon)", !Config.DisableCoopAutoSummon);
     WriteState("Coop", !Config.DisableCoop);
 #undef WriteState
+
+    if (!Config.DisableBloodMessages || !Config.DisableBloodStains || !Config.DisableGhosts)
+    {
+        Error(
+            "\n\n"
+            "=============================================== WARNING ===============================================\n"
+            " Blood messages, stains, ghosts and other serialized data that is client-generated and client-parsed\n"
+            " are vulnerable to CVE-2022-24125 and CVE-2022-24126.\n"
+            "\n"
+            " Until FROM SOFTWARE patch the client it is not advised to run with these enabled, unless you are only\n"
+            " permitting access to the server to only people you trust.\n"
+            "=======================================================================================================\n"
+            "\n\n"
+        );
+    }
 
     return true;
 }
@@ -300,6 +325,12 @@ void Server::PollServerAdvertisement()
     {
         return;
     }
+    if constexpr (!BuildConfig::SEND_MESSAGE_TO_PLAYERS_SANITY_CHECKS || !BuildConfig::NRSSR_SANITY_CHECKS)
+    {
+        Warning("Security fixes for RequestSendMessageToPlayers or the NRSSR RCE exploit are disabled. As such, the server will not be listed publicly.");
+        Config.Advertise = false;
+        return;
+    }
 
     // Waiting for current advertisement to finish.
     if (MasterServerUpdateRequest)
@@ -331,6 +362,7 @@ void Server::PollServerAdvertisement()
         Body["ModsWhiteList"] = Config.ModsWhitelist;
         Body["ModsBlackList"] = Config.ModsBlacklist;
         Body["ModsRequiredList"] = Config.ModsRequiredList;        
+        Body["ServerVersion"] = BuildConfig::MASTER_SERVER_CLIENT_VERSION;
 
         MasterServerUpdateRequest = std::make_shared<NetHttpRequest>();
         MasterServerUpdateRequest->SetMethod(NetHttpMethod::POST);
@@ -352,16 +384,33 @@ void Server::RunUntilQuit()
     // This suffices for now.
     while (!QuitRecieved)
     {
-        double StartTime = GetSeconds();
-
-        for (auto& Service : Services)
         {
-            Service->Poll();
+            DebugTimerScope Scope(Debug::UpdateTime);
+
+            for (auto& Service : Services)
+            {
+                Service->Poll();
+            }
+
+            PollDiscordNotices();
+            PollServerAdvertisement();
         }
 
-        PollServerAdvertisement();
+        // Emulate frametime spikes.
+        if constexpr (BuildConfig::EMULATE_SPIKES)
+        {
+            if (GetSeconds() > NextSpikeTime)
+            {
+                double DurationMs = FRandRange(BuildConfig::SPIKE_LENGTH_MIN, BuildConfig::SPIKE_LENGTH_MAX);
+                double IntervalMs = FRandRange(BuildConfig::SPIKE_INTERVAL_MIN, BuildConfig::SPIKE_INTERVAL_MAX);
 
-        UpdateTime = GetSeconds() - StartTime;
+                Log("Emulating spike of %.2f ms", DurationMs);
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<size_t>(DurationMs)));
+
+                NextSpikeTime = GetSeconds() + (IntervalMs / 1000.0);
+            }
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -372,5 +421,184 @@ void Server::SaveConfig()
     if (!Config.Save(ConfigPath))
     {
         Error("Failed to save configuration file: %s", ConfigPath.string().c_str());
+    }
+}
+
+void Server::SendDiscordNotice(
+    std::shared_ptr<GameClient> origin, 
+    DiscordNoticeType noticeType, 
+    const std::string& message,
+    uint32_t extraId,
+    std::vector<DiscordField> customFields)
+{
+    if (Config.DiscordWebHookUrl.empty())
+    {
+        return;
+    }
+
+    uint32_t PlayerId = origin->GetPlayerState().GetPlayerId();
+
+    if (auto Iter = DiscordOriginCooldown.find(PlayerId); Iter != DiscordOriginCooldown.end())
+    {
+        float Elapsed = GetSeconds() - Iter->second;
+        if (Elapsed < k_DiscordOriginCooldownMin)
+        {
+            return;
+        }
+    }
+
+    DiscordOriginCooldown[PlayerId] = GetSeconds();
+
+    PendingDiscordNotices.push({ origin, noticeType, message, extraId, customFields });
+}
+
+void Server::PollDiscordNotices()
+{
+    if (!DiscordNoticeRequest)
+    {
+        if (!PendingDiscordNotices.empty())
+        {
+            PendingDiscordNotice Notice = PendingDiscordNotices.front();
+            PendingDiscordNotices.pop();
+
+            auto embeds = nlohmann::json::array();
+
+            uint64_t SteamId64;
+            sscanf(Notice.origin->GetPlayerState().GetSteamId().c_str(), "%016llx", &SteamId64);
+
+            auto author = nlohmann::json::object();
+            auto embed = nlohmann::json::object();
+
+            std::string thumbnailUrl = "";
+
+            switch (Notice.type)
+            {
+                case DiscordNoticeType::AntiCheat:
+                {
+                    embed["color"] = "14423100"; // Red
+                    break;
+                }
+                case DiscordNoticeType::Bell:
+                {
+                    embed["color"] = "8900346"; // Blue
+                    break;
+                }
+                case DiscordNoticeType::UndeadMatch:
+                {
+                    embed["color"] = "3329330"; // Green
+                    break;
+                }
+                case DiscordNoticeType::SummonSign:
+                {
+                    embed["color"] = "16316671"; // White
+                    thumbnailUrl = WhiteSoapstoneThumbnail;
+                    break;
+                }
+                case DiscordNoticeType::SummonSignPvP:
+                {
+                    embed["color"] = "14423100"; // Red
+                    thumbnailUrl = RedSoapstoneThumbnail;
+                    break;
+                }
+                case DiscordNoticeType::PvPKill:
+                {
+                    embed["color"] = "14423100"; // Red
+                    break;
+                }
+                case DiscordNoticeType::BonfireLit:
+                {
+                    embed["color"] = "16747520"; // Orange
+                    thumbnailUrl = BonfireThumbnail;
+                    break;
+                }
+                case DiscordNoticeType::DiedToBoss:
+                case DiscordNoticeType::KilledBoss:
+                {
+                    if (Notice.type  == DiscordNoticeType::KilledBoss)
+                    {
+                        embed["color"] = "16766720"; // Gold
+                    }
+                    else
+                    {
+                        embed["color"] = "14423100"; // Red
+                    }
+
+                    BossId bossId = static_cast<BossId>(Notice.extraId);
+                    if (auto Iter = DiscordBossThumbnails.find(bossId); Iter != DiscordBossThumbnails.end())
+                    {
+                        thumbnailUrl = Iter->second;
+                    }
+
+                    break;
+                }
+            }
+
+            if (!Notice.customFields.empty())
+            {
+                auto fieldObj = nlohmann::json::array();
+
+                for (auto& pair : Notice.customFields)
+                {
+                    auto field = nlohmann::json::object();
+                    field["name"] = pair.name;
+                    field["value"] = pair.value;
+                    field["inline"] = pair.is_inline;
+
+                    fieldObj.push_back(field);
+                }
+
+                embed["fields"] = fieldObj;
+            }
+
+            author["name"] = Notice.origin->GetPlayerState().GetCharacterName();
+            author["url"] = StringFormat("https://steamcommunity.com/profiles/%s", std::to_string(SteamId64).c_str());
+
+            embed["author"] = author;
+            embed["description"] = Notice.message;
+
+            if (!thumbnailUrl.empty())
+            {
+                embed["thumbnail"] = nlohmann::json::object();
+                embed["thumbnail"]["url"] = thumbnailUrl;
+            }
+
+            embeds.push_back(embed);
+
+            nlohmann::json Body;
+            Body["embeds"] = embeds;
+
+            Log("Sending notification from %s: %s", Notice.origin->GetPlayerState().GetCharacterName().c_str(), Notice.message.c_str());
+
+            std::string FormattedBody = Body.dump(4);
+
+            DiscordNoticeRequest = std::make_shared<NetHttpRequest>();
+            DiscordNoticeRequest->SetMethod(NetHttpMethod::POST);
+            DiscordNoticeRequest->SetUrl(Config.DiscordWebHookUrl);
+            DiscordNoticeRequest->SetBody(FormattedBody);
+            if (!DiscordNoticeRequest->SendAsync())
+            {
+                Warning("Recieved error when trying to send discord notification.");
+            }
+        }
+    }
+    else if (!DiscordNoticeRequest->InProgress())
+    {
+        if (std::shared_ptr<NetHttpResponse> Response = DiscordNoticeRequest->GetResponse(); Response)
+        {
+            if (!Response->GetWasSuccess())
+            {
+                Warning("Recieved error when trying to send discord notification.");
+            }
+            else
+            {
+                Log("Discord notice successfully sent.");
+            }
+        }
+        else
+        {
+            Warning("No response recieved to discord notification.");
+        }
+
+        DiscordNoticeRequest = nullptr;
     }
 }

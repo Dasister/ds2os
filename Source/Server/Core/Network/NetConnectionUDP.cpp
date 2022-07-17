@@ -9,6 +9,8 @@
 
 #include "Core/Network/NetConnectionUDP.h"
 #include "Core/Utils/Logging.h"
+#include "Core/Utils/Random.h"
+#include "Core/Utils/DebugObjects.h"
 #include "Config/BuildConfig.h"
 #include "Core/Crypto/Cipher.h"
 
@@ -19,7 +21,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #endif
-
 
 NetConnectionUDP::NetConnectionUDP(const std::string& InName)
     : Name(InName)
@@ -76,7 +77,8 @@ bool NetConnectionUDP::Listen(int Port)
         return false;
     }
 #else
-    if (int flags = fcntl(Socket, F_GETFL, 0); flags == -1)
+    int flags;
+    if (flags = fcntl(Socket, F_GETFL, 0); flags == -1)
     {
         ErrorS(GetName().c_str(), "Failed to get socket flags.");
         return false;
@@ -88,6 +90,19 @@ bool NetConnectionUDP::Listen(int Port)
         return false;
     }
 #endif
+
+    // Boost buffer sizes 
+    int BufferSize = 16 * 1024 * 1024;
+    if (setsockopt(Socket, SOL_SOCKET, SO_RCVBUF, (const char*)&BufferSize, sizeof(BufferSize)))
+    {
+        Error(GetName().c_str(), "Failed to set socket options: SO_RCVBUF");
+        return false;
+    }
+    if (setsockopt(Socket, SOL_SOCKET, SO_SNDBUF, (const char*)&BufferSize, sizeof(BufferSize)))
+    {
+        Error(GetName().c_str(), "Failed to set socket options: SO_SNDBUF");
+        return false;
+    }
 
     struct sockaddr_in ListenAddress;
     ListenAddress.sin_family = AF_INET;
@@ -159,7 +174,8 @@ bool NetConnectionUDP::Connect(std::string Hostname, int Port, bool ForceLastIpE
         return false;
     }
 #else
-    if (int flags = fcntl(Socket, F_GETFL, 0); flags == -1)
+    int flags;
+    if (flags = fcntl(Socket, F_GETFL, 0); flags == -1)
     {
         ErrorS(GetName().c_str(), "Failed to get socket flags.");
         return false;
@@ -171,6 +187,19 @@ bool NetConnectionUDP::Connect(std::string Hostname, int Port, bool ForceLastIpE
         return false;
     }
 #endif
+
+    // Boost buffer sizes 
+    int BufferSize = 16 * 1024 * 1024;
+    if (setsockopt(Socket, SOL_SOCKET, SO_RCVBUF, (const char*)&BufferSize, sizeof(BufferSize)))
+    {
+        Error(GetName().c_str(), "Failed to set socket options: SO_RCVBUF");
+        return false;
+    }
+    if (setsockopt(Socket, SOL_SOCKET, SO_SNDBUF, (const char*)&BufferSize, sizeof(BufferSize)))
+    {
+        Error(GetName().c_str(), "Failed to set socket options: SO_SNDBUF");
+        return false;
+    }
 
     struct sockaddr_in ListenAddress;
     ListenAddress.sin_family = AF_INET;
@@ -273,6 +302,8 @@ bool NetConnectionUDP::Send(const std::vector<uint8_t>& Buffer, int Offset, int 
         ntohs(Destination.sin_port));
     */
 
+    Debug::UdpBytesSent.Add(Count);
+
     return true;
 }
 
@@ -285,7 +316,11 @@ bool NetConnectionUDP::Disconnect()
 
     if (!bChild)
     {
+#ifdef _WIN32
         closesocket(Socket);
+#else
+        close(Socket);
+#endif
     }
     Socket = INVALID_SOCKET_VALUE;
     
@@ -308,6 +343,61 @@ bool NetConnectionUDP::IsConnected()
     return true;
 }
 
+void NetConnectionUDP::ProcessPacket(const PendingPacket& Packet)
+{
+    if (bListening)
+    {
+        // See if this came from a source we have an existing connection for.
+        bool bRoutedPacket = false;
+        for (auto ConnectionWeakPtr : ChildConnections)
+        {
+            if (std::shared_ptr<NetConnectionUDP> Connection = ConnectionWeakPtr.lock())
+            {
+                if (Connection->Destination.sin_addr.s_addr == Packet.SourceAddress.sin_addr.s_addr &&
+                    Connection->Destination.sin_port == Packet.SourceAddress.sin_port)
+                {
+                    Connection->RecieveQueue.push_back(Packet.Data);
+                    bRoutedPacket = true;
+                    break;
+                }
+            }
+        }
+
+        // Otherwise create a new connection and use that.
+        if (!bRoutedPacket)
+        {
+            std::vector<char> ClientName;
+            ClientName.resize(64);
+            snprintf(ClientName.data(), ClientName.size(), "%s:%s:%i", Name.c_str(), inet_ntoa(Packet.SourceAddress.sin_addr), Packet.SourceAddress.sin_port);
+
+#ifdef _WIN32
+            NetIPAddress NetClientAddress(
+                Packet.SourceAddress.sin_addr.S_un.S_un_b.s_b1,
+                Packet.SourceAddress.sin_addr.S_un.S_un_b.s_b2,
+                Packet.SourceAddress.sin_addr.S_un.S_un_b.s_b3,
+                Packet.SourceAddress.sin_addr.S_un.S_un_b.s_b4);
+#else
+
+            NetIPAddress NetClientAddress(
+                (Packet.SourceAddress.sin_addr.s_addr) & 0xFF,
+                (Packet.SourceAddress.sin_addr.s_addr >> 8) & 0xFF,
+                (Packet.SourceAddress.sin_addr.s_addr >> 16) & 0xFF,
+                (Packet.SourceAddress.sin_addr.s_addr >> 24) & 0xFF
+            );
+#endif
+
+            std::shared_ptr<NetConnectionUDP> NewConnection = std::make_shared<NetConnectionUDP>(Socket, Packet.SourceAddress, ClientName.data(), NetClientAddress);
+            NewConnection->RecieveQueue.push_back(Packet.Data);
+            NewConnections.push_back(NewConnection);
+            ChildConnections.push_back(NewConnection);
+        }
+    }
+    else
+    {
+        RecieveQueue.push_back(Packet.Data);
+    }
+}
+
 bool NetConnectionUDP::Pump()
 {
     if (Socket == INVALID_SOCKET_VALUE)
@@ -317,80 +407,91 @@ bool NetConnectionUDP::Pump()
     
     if (!bChild)
     {
-        // Recieve any pending datagrams and route to the appropriate child recieve queue.
-
-        socklen_t SourceAddressSize = sizeof(struct sockaddr);
-        sockaddr_in SourceAddress = { 0 };
-
-        int Result = recvfrom(Socket, (char*)RecieveBuffer.data(), (int)RecieveBuffer.size(), 0, (sockaddr*)&SourceAddress, &SourceAddressSize);
-        if (Result < 0)
+        while (true)
         {
-    #if defined(_WIN32)
-            int error = WSAGetLastError();
-    #else
-            int error = errno;
-    #endif
+            // Recieve any pending datagrams and route to the appropriate child recieve queue.
 
-            // Blocking is fine, just return.
-    #if defined(_WIN32)
-            if (error == WSAEWOULDBLOCK)
-    #else        
-            if (error == EWOULDBLOCK || error == EAGAIN)
-    #endif
+            socklen_t SourceAddressSize = sizeof(struct sockaddr);
+            sockaddr_in SourceAddress = { 0 };
+
+            int Flags = 0;
+#ifdef __unix__
+            Flags |= MSG_DONTWAIT;
+#endif
+
+            int Result = recvfrom(Socket, (char*)RecieveBuffer.data(), (int)RecieveBuffer.size(), Flags, (sockaddr*)&SourceAddress, &SourceAddressSize);
+            if (Result < 0)
             {
+        #if defined(_WIN32)
+                int error = WSAGetLastError();
+        #else
+                int error = errno;
+        #endif
+
+                // Blocking is fine, just return.
+        #if defined(_WIN32)
+                if (error == WSAEWOULDBLOCK)
+        #else        
+                if (error == EWOULDBLOCK || error == EAGAIN)
+        #endif
+                {
+                    break;
+                }
+
+                ErrorS(GetName().c_str(), "Failed to recieve with error 0x%08x.", error);
                 return false;
             }
-
-            ErrorS(GetName().c_str(), "Failed to recieve with error 0x%08x.", error);
-            return false;
-        }
-        else if (Result > 0)
-        {
-            std::vector<uint8_t> Packet(RecieveBuffer.data(), RecieveBuffer.data() + Result);
-
-            if (bListening)
+            else if (Result > 0)
             {
-                // See if this came from a source we have an existing connection for.
-                bool bRoutedPacket = false;
-                for (auto ConnectionWeakPtr : ChildConnections)
+                std::vector<uint8_t> Packet(RecieveBuffer.data(), RecieveBuffer.data() + Result);
+
+                bool bDropPacket = false;
+
+                if constexpr (BuildConfig::EMULATE_DROPPED_PACKETS)
                 {
-                    if (std::shared_ptr<NetConnectionUDP> Connection = ConnectionWeakPtr.lock())
+                    if (FRandRange(0.0f, 1.0f) <= BuildConfig::DROP_PACKET_PROBABILITY)
                     {
-                        if (Connection->Destination.sin_addr.S_un.S_addr == SourceAddress.sin_addr.S_un.S_addr &&
-                            Connection->Destination.sin_port == SourceAddress.sin_port)
-                        {
-                            Connection->RecieveQueue.push_back(Packet);
-                            bRoutedPacket = true;
-                            break;
-                        }
+                        bDropPacket = true;
                     }
                 }
 
-                // Otherwise create a new connection and use that.
-                if (!bRoutedPacket)
+                if (!bDropPacket)
                 {
-                    std::vector<char> ClientName;
-                    ClientName.resize(64);
-                    snprintf(ClientName.data(), ClientName.size(), "%s:%s:%i", Name.c_str(), inet_ntoa(SourceAddress.sin_addr), SourceAddress.sin_port);
+                    double Latency = BuildConfig::LATENCY_MINIMUM + FRandRange(-BuildConfig::LATENCY_VARIANCE, BuildConfig::LATENCY_VARIANCE);
 
-                    NetIPAddress NetClientAddress(
-                        SourceAddress.sin_addr.S_un.S_un_b.s_b1,
-                        SourceAddress.sin_addr.S_un.S_un_b.s_b2,
-                        SourceAddress.sin_addr.S_un.S_un_b.s_b3,
-                        SourceAddress.sin_addr.S_un.S_un_b.s_b4);
+                    PendingPacket Pending;
+                    Pending.Data = Packet;
+                    Pending.SourceAddress = SourceAddress;
+                    Pending.ProcessTime = GetSeconds() + (Latency / 1000.0f);
 
-                    std::shared_ptr<NetConnectionUDP> NewConnection = std::make_shared<NetConnectionUDP>(Socket, SourceAddress, ClientName.data(), NetClientAddress);
-                    NewConnection->RecieveQueue.push_back(Packet);
-                    NewConnections.push_back(NewConnection);
-                    ChildConnections.push_back(NewConnection);
+                    if constexpr (BuildConfig::EMULATE_LATENCY)
+                    {
+                        PendingPackets.push_back(Pending);
+                    }
+                    else
+                    {
+                        ProcessPacket(Pending);
+                    }
                 }
-            }
-            else
-            {
-                RecieveQueue.push_back(Packet);
-            }
 
-            //LogS(GetName().c_str(), "<< %i", Result);
+                Debug::UdpBytesRecieved.Add(Result);
+
+                //LogS(GetName().c_str(), "<< %i", Result);
+            }
+        }
+    }
+
+    // Recieve pending packets.
+    for (auto iter = PendingPackets.begin(); iter != PendingPackets.end(); /* empty */)
+    {
+        if (GetSeconds() > iter->ProcessTime)
+        {
+            ProcessPacket(*iter);
+            iter = PendingPackets.erase(iter);
+        }
+        else
+        {
+            iter++;
         }
     }
 

@@ -10,6 +10,7 @@
 #include "Server/Database/ServerDatabase.h"
 #include "Config/BuildConfig.h"
 #include "Core/Utils/Logging.h"
+#include "Core/Utils/DebugObjects.h"
 #include "ThirdParty/sqlite/sqlite3.h"
 
 ServerDatabase::ServerDatabase()
@@ -146,6 +147,22 @@ bool ServerDatabase::CreateTables()
         "   PlayerSteamId       CHAR(50)"                                           \
         ");"
     );
+    tables.push_back(
+        "CREATE TABLE IF NOT EXISTS AntiCheatStates("                               \
+        "   StateId             INTEGER PRIMARY KEY AUTOINCREMENT,"                 \
+        "   PlayerSteamId       CHAR(50),"                                          \
+        "   Score               REAL"                                               \
+        ");"
+    );
+    tables.push_back(
+        "CREATE TABLE IF NOT EXISTS AntiCheatLogs("                                 \
+        "   LogId               INTEGER PRIMARY KEY AUTOINCREMENT,"                 \
+        "   PlayerSteamId       CHAR(50),"                                          \
+        "   Score               REAL,"                                              \
+        "   TriggerName         CHAR(1024),"                                        \
+        "   ExtraInfo           CHAR(1024)"                                         \
+        ");"
+    );
 
     for (const std::string& statement : tables)
     {
@@ -164,6 +181,9 @@ bool ServerDatabase::CreateTables()
 
 bool ServerDatabase::RunStatement(const std::string& sql, const std::vector<DatabaseValue>& Values, RowCallback Callback)
 {
+    DebugTimerScope Scope(Debug::DatabaseQueryTime);
+    Debug::DatabaseQueries.Add(1.0f);
+
     sqlite3_stmt* statement = nullptr;
     if (int result = sqlite3_prepare_v2(db_handle, sql.c_str(), (int)sql.length(), &statement, nullptr); result != SQLITE_OK)
     {
@@ -301,6 +321,12 @@ void ServerDatabase::BanPlayer(const std::string& SteamId)
     RunStatement("INSERT INTO Bans(PlayerSteamId) VALUES(?1)", { SteamId }, nullptr);
 }
 
+void ServerDatabase::UnbanPlayer(const std::string& SteamId)
+{
+    RunStatement("DELETE FROM Bans WHERE PlayerSteamId = ?1", { SteamId }, nullptr);
+    RunStatement("UPDATE AntiCheatStates SET Score = 0 WHERE PlayerSteamId = ?1", { SteamId }, nullptr);
+}
+
 bool ServerDatabase::IsPlayerBanned(const std::string& SteamId)
 {
     uint32_t Result = 0;
@@ -310,6 +336,17 @@ bool ServerDatabase::IsPlayerBanned(const std::string& SteamId)
     });
 
     return Result > 0;
+}
+
+std::vector<std::string> ServerDatabase::GetBannedSteamIds()
+{
+    std::vector<std::string> Result;
+
+    RunStatement("SELECT PlayerSteamId FROM Bans", { }, [&Result](sqlite3_stmt* statement) {
+        Result.push_back((const char*)sqlite3_column_text(statement, 0));
+    });
+
+    return Result;
 }
 
 std::shared_ptr<BloodMessage> ServerDatabase::FindBloodMessage(uint32_t MessageId)
@@ -705,6 +742,11 @@ void ServerDatabase::AddMatchingSample(const std::string& Name, const std::strin
 
 void ServerDatabase::AddStatistic(const std::string& Name, const std::string& Scope, int64_t Count)
 {
+    if constexpr (!BuildConfig::DATABASE_STAT_GATHERING_ENABLED)
+    {
+        return;
+    }
+
     if (!RunStatement("UPDATE Statistics SET Value = Value + ?3 WHERE Name = ?1 AND Scope = ?2", { Name, Scope, Count }, nullptr))
     {
         return;
@@ -721,6 +763,11 @@ void ServerDatabase::AddStatistic(const std::string& Name, const std::string& Sc
 
 void ServerDatabase::SetStatistic(const std::string& Name, const std::string& Scope, int64_t Count)
 {
+    if constexpr (!BuildConfig::DATABASE_STAT_GATHERING_ENABLED)
+    {
+        return;
+    }
+
     if (!RunStatement("UPDATE Statistics SET Value = ?3 WHERE Name = ?1 AND Scope = ?2", { Name, Scope, Count }, nullptr))
     {
         return;
@@ -737,6 +784,11 @@ void ServerDatabase::SetStatistic(const std::string& Name, const std::string& Sc
 
 int64_t ServerDatabase::GetStatistic(const std::string& Name, const std::string& Scope)
 {
+    if constexpr (!BuildConfig::DATABASE_STAT_GATHERING_ENABLED)
+    {
+        return 0;
+    }
+
     int64_t Result;
 
     RunStatement("SELECT Value FROM Statistics WHERE Name = ?1 AND Scope = ?2 LIMIT 1", { Name, Scope }, [&Result](sqlite3_stmt* statement) {
@@ -763,7 +815,12 @@ int64_t ServerDatabase::GetGlobalStatistic(const std::string& Name)
 
 void ServerDatabase::AddPlayerStatistic(const std::string& Name, uint32_t PlayerId, int64_t Count)
 {
-    if constexpr (BuildConfig::STORE_PER_PLAYER_STATISTICS)
+    if constexpr (!BuildConfig::DATABASE_STAT_GATHERING_ENABLED)
+    {
+        return;
+    }
+
+    if constexpr (!BuildConfig::STORE_PER_PLAYER_STATISTICS)
     {
         return;
     }
@@ -776,7 +833,12 @@ void ServerDatabase::AddPlayerStatistic(const std::string& Name, uint32_t Player
 
 void ServerDatabase::SetPlayerStatistic(const std::string& Name, uint32_t PlayerId, int64_t Count)
 {
-    if constexpr (BuildConfig::STORE_PER_PLAYER_STATISTICS)
+    if constexpr (!BuildConfig::DATABASE_STAT_GATHERING_ENABLED)
+    {
+        return;
+    }
+
+    if constexpr (!BuildConfig::STORE_PER_PLAYER_STATISTICS)
     {
         return;
     }
@@ -789,7 +851,12 @@ void ServerDatabase::SetPlayerStatistic(const std::string& Name, uint32_t Player
 
 int64_t ServerDatabase::GetPlayerStatistic(const std::string& Name, uint32_t PlayerId)
 {
-    if constexpr (BuildConfig::STORE_PER_PLAYER_STATISTICS)
+    if constexpr (!BuildConfig::DATABASE_STAT_GATHERING_ENABLED)
+    {
+        return 0;
+    }
+
+    if constexpr (!BuildConfig::STORE_PER_PLAYER_STATISTICS)
     {
         return 0;
     }
@@ -798,6 +865,58 @@ int64_t ServerDatabase::GetPlayerStatistic(const std::string& Name, uint32_t Pla
     snprintf(Scope, 64, "Player/%u", PlayerId);
 
     return GetStatistic(Name, Scope);
+}
+
+float ServerDatabase::GetAntiCheatPenaltyScore(const std::string& SteamId)
+{
+    float Result = 0.0f;
+
+    RunStatement("SELECT Score FROM AntiCheatStates WHERE PlayerSteamId = ?1 LIMIT 1", { SteamId }, [&Result](sqlite3_stmt* statement) {
+        Result = (float)sqlite3_column_double(statement, 0);
+    });
+
+    return Result;
+}
+
+void ServerDatabase::AddAntiCheatPenaltyScore(const std::string& SteamId, float Amount)
+{
+    if (!RunStatement("UPDATE AntiCheatStates SET Score = Score + ?2 WHERE PlayerSteamId = ?1", { SteamId, Amount }, nullptr))
+    {
+        return;
+    }
+
+    if (sqlite3_changes(db_handle) == 0)
+    {
+        if (!RunStatement("INSERT INTO AntiCheatStates(PlayerSteamId, Score) VALUES(?1, ?2)", { SteamId, Amount }, nullptr))
+        {
+            return;
+        }
+    }
+}
+
+void ServerDatabase::LogAntiCheatTrigger(const std::string& SteamId, const std::string& TriggerName, float Penalty, const std::string& ExtraInfo)
+{
+    if (!RunStatement("INSERT INTO AntiCheatLogs(PlayerSteamId, Score, TriggerName, ExtraInfo) VALUES(?1, ?2, ?3, ?4)", { SteamId, Penalty, TriggerName, ExtraInfo }, nullptr))
+    {
+        return;
+    }
+}
+
+std::vector<AntiCheatLog> ServerDatabase::GetAntiCheatLogs(const std::string& SteamId)
+{
+    std::vector<AntiCheatLog> Result;
+
+    RunStatement("SELECT Score, TriggerName, ExtraInfo FROM AntiCheatLogs WHERE PlayerSteamId = ?1", { SteamId }, [&Result, SteamId](sqlite3_stmt* statement) {
+        AntiCheatLog Log;
+        Log.SteamId = SteamId;
+        Log.Score = (float)sqlite3_column_double(statement, 0);
+        Log.TriggerName = (const char*)sqlite3_column_text(statement, 1);
+        Log.Extra = (const char*)sqlite3_column_text(statement, 2);
+
+        Result.push_back(Log);
+    });
+
+    return Result;
 }
 
 void ServerDatabase::TrimTable(const std::string& TableName, const std::string& IdColumn, size_t MaxEntries)

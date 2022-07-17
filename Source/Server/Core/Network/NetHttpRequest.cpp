@@ -84,14 +84,14 @@ bool NetHttpRequest::StartRequest()
 
     switch (Method)
     {
-    case NetHttpMethod::OPTIONS:            curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "OPTIONS");     break;
-    case NetHttpMethod::GET:                curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "GET");         break;
-    case NetHttpMethod::HEAD:               curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "HEAD");        break;
-    case NetHttpMethod::POST:               curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "POST");        break;
-    case NetHttpMethod::PUT:                curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "PUT");         break;
-    case NetHttpMethod::METHOD_DELETE:      curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "DELETE");      break;
-    case NetHttpMethod::TRACE:              curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "TRACE");       break;
-    case NetHttpMethod::CONNECT:            curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "CONNECT");     break;
+        case NetHttpMethod::OPTIONS:            curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "OPTIONS");     break;
+        case NetHttpMethod::GET:                curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "GET");         break;
+        case NetHttpMethod::HEAD:               curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "HEAD");        break;
+        case NetHttpMethod::POST:               curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "POST");        break;
+        case NetHttpMethod::PUT:                curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "PUT");         break;
+        case NetHttpMethod::METHOD_DELETE:      curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "DELETE");      break;
+        case NetHttpMethod::TRACE:              curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "TRACE");       break;
+        case NetHttpMethod::CONNECT:            curl_easy_setopt(Handle, CURLOPT_CUSTOMREQUEST, "CONNECT");     break;
     }
 
     if (Body.size() > 0)

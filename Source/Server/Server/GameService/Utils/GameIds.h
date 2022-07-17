@@ -1,5 +1,5 @@
 /*
- * Dark Souls 2_Open Server
+ * Dark Souls 3_Open Server
  * Copyright (C) 2021 Tim Leonard
  *
  * This program is free software; licensed under the MIT license.
@@ -62,6 +62,13 @@
 
 #define ENUM_NAME TeamTypeId
 #define ENUM_FILE "Server/GameService/Utils/Ids/TeamTypeId.inc"
+#   include "Core/Utils/EnumDef.inc"
+#undef ENUM_NAME
+#undef ENUM_FILE
+
+
+#define ENUM_NAME BossId
+#define ENUM_FILE "Server/GameService/Utils/Ids/BossId.inc"
 #   include "Core/Utils/EnumDef.inc"
 #undef ENUM_NAME
 #undef ENUM_FILE

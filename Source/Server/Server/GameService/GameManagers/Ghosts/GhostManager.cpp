@@ -15,6 +15,9 @@
 #include "Config/RuntimeConfig.h"
 #include "Server/Server.h"
 
+#include "Config/BuildConfig.h"
+#include "Server/GameService/Utils/NRSSRSanitizer.h"
+
 #include "Core/Utils/Logging.h"
 #include "Core/Utils/Strings.h"
 
@@ -85,7 +88,22 @@ MessageHandleResult GhostManager::Handle_RequestCreateGhostData(GameClient* Clie
     std::vector<uint8_t> Data;
     Data.assign(Request->data().data(), Request->data().data() + Request->data().size());
 
-    if (std::shared_ptr<Ghost> ActiveGhost = Database.CreateGhost((OnlineAreaId)Request->online_area_id(), Player.PlayerId, Player.SteamId, Data))
+    // There is no NRSSR struct in ghost data, but we still make sure the size-delimited entry list is valid.
+    if constexpr (BuildConfig::NRSSR_SANITY_CHECKS)
+    {
+        auto ValidationResult = NRSSRSanitizer::ValidateEntryList(Data.data(), Data.size());
+        if (ValidationResult != NRSSRSanitizer::ValidationResult::Valid)
+        {
+            WarningS(Client->GetName().c_str(), "Ghost data recieved from client is invalid (error code %i).",
+                static_cast<uint32_t>(ValidationResult));
+
+            Client->GetPlayerState().GetAntiCheatState_Mutable().ExploitDetected = true;
+
+            return MessageHandleResult::Handled;
+        }
+    }
+
+    if (std::shared_ptr<Ghost> ActiveGhost = Database.CreateGhost((OnlineAreaId)Request->online_area_id(), Player.GetPlayerId(), Player.GetSteamId(), Data))
     {
         LiveCache.Add(ActiveGhost->OnlineAreaId, ActiveGhost->GhostId, ActiveGhost);
     }
@@ -97,7 +115,7 @@ MessageHandleResult GhostManager::Handle_RequestCreateGhostData(GameClient* Clie
 
     std::string TypeStatisticKey = StringFormat("Ghosts/TotalGhostsCreated");
     Database.AddGlobalStatistic(TypeStatisticKey, 1);
-    Database.AddPlayerStatistic(TypeStatisticKey, Player.PlayerId, 1);
+    Database.AddPlayerStatistic(TypeStatisticKey, Player.GetPlayerId(), 1);
 
     // Empty response, not sure what purpose this serves really other than saying message-recieved. Client
     // doesn't work without it though.
@@ -113,38 +131,43 @@ MessageHandleResult GhostManager::Handle_RequestCreateGhostData(GameClient* Clie
 
 MessageHandleResult GhostManager::Handle_RequestGetGhostDataList(GameClient* Client, const Frpg2ReliableUdpMessage& Message)
 {
+    const RuntimeConfig& Config = ServerInstance->GetConfig();
     ServerDatabase& Database = ServerInstance->GetDatabase();
     PlayerState& Player = Client->GetPlayerState();
 
     Frpg2RequestMessage::RequestGetGhostDataList* Request = (Frpg2RequestMessage::RequestGetGhostDataList*)Message.Protobuf.get();
     Frpg2RequestMessage::RequestGetGhostDataListResponse Response;
+    Response.mutable_ghosts();
 
     uint32_t RemainingGhostCount = Request->max_ghosts();
 
-    // Grab a random set of stains from the live cache.
-    for (int i = 0; i < Request->search_areas_size() && RemainingGhostCount > 0; i++)
+    if (!Config.DisableGhosts)
     {
-        const Frpg2RequestMessage::DomainLimitData& Area = Request->search_areas(i);
-
-        OnlineAreaId AreaId = (OnlineAreaId)Area.online_area_id();
-        uint32_t MaxForArea = Area.max_items();
-        uint32_t GatherCount = std::min(MaxForArea, RemainingGhostCount);
-
-        std::vector<std::shared_ptr<Ghost>> ActiveGhosts = LiveCache.GetRandomSet(AreaId, GatherCount);
-        for (std::shared_ptr<Ghost>& AreaMsg : ActiveGhosts)
+        // Grab a random set of stains from the live cache.
+        for (int i = 0; i < Request->search_areas_size() && RemainingGhostCount > 0; i++)
         {
-            // Filter players own messages.
-            if (AreaMsg->PlayerId == Player.PlayerId)
+            const Frpg2RequestMessage::DomainLimitData& Area = Request->search_areas(i);
+
+            OnlineAreaId AreaId = (OnlineAreaId)Area.online_area_id();
+            uint32_t MaxForArea = Area.max_items();
+            uint32_t GatherCount = std::min(MaxForArea, RemainingGhostCount);
+
+            std::vector<std::shared_ptr<Ghost>> ActiveGhosts = LiveCache.GetRandomSet(AreaId, GatherCount);
+            for (std::shared_ptr<Ghost>& AreaMsg : ActiveGhosts)
             {
-                continue;
+                // Filter players own messages.
+                if (AreaMsg->PlayerId == Player.GetPlayerId())
+                {
+                    continue;
+                }
+
+                Frpg2RequestMessage::GhostData& Data = *Response.mutable_ghosts()->Add();
+                Data.set_unknown_1(1);                                                      // TODO: Figure out what this is.
+                Data.set_ghost_id((uint32_t)AreaMsg->GhostId);
+                Data.set_data(AreaMsg->Data.data(), AreaMsg->Data.size());
+
+                RemainingGhostCount--;
             }
-
-            Frpg2RequestMessage::GhostData& Data = *Response.mutable_ghosts()->Add();
-            Data.set_unknown_1(1);                                                      // TODO: Figure out what this is.
-            Data.set_ghost_id((uint32_t)AreaMsg->GhostId);
-            Data.set_data(AreaMsg->Data.data(), AreaMsg->Data.size());
-
-            RemainingGhostCount--;
         }
     }
 
