@@ -44,10 +44,18 @@ void WriteLog(ConsoleColor Color, const char* Source, const char* Level, const c
 #define ErrorS(Source, Format, ...)             WriteLog(ConsoleColor::Red,       Source, "Error", Format, ##__VA_ARGS__);
 #define FatalS(Source, Format, ...)             WriteLog(ConsoleColor::Red,       Source, "Fatal", Format, ##__VA_ARGS__); Ensure(false);
 
+#ifdef _WIN32
+#define Breakpoint() __debugbreak()
+#else
+#include <csignal>
+#define Breakpoint() raise(SIGTRAP)
+#endif
+
+
 // Some general purpose debugging/assert macros.
 #define Ensure(expr)                                \
     if (!(expr))                                    \
     {                                               \
         Error("Check Failed: " #expr);              \
-        __debugbreak();                             \
+        Breakpoint();                               \
     }                                               
