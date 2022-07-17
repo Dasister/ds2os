@@ -157,7 +157,7 @@ bool RuntimeConfigMatchingParameters::CheckMatch(int HostSoulLevel, int HostWeap
         if (HostSoulLevel >= RangeRemovalLevel)
         {
             lower_limit = (float)RangeRemovalLevel;
-            upper_limit = FLT_MAX;
+            upper_limit = std::numeric_limits<float>::max();
         }
 
         // If match falls outside bounds host can't match with them.
